@@ -10,14 +10,6 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
-
-//Automatically create the uploads folder if it doesn't exist
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-  console.log('Created uploads folder');
-}
-
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/'); 
@@ -39,8 +31,7 @@ mongoose.connect(process.env.MONGO_URI)
   .catch((err) => console.error('MongoDB connection error:', err));
 
 
-app.post('/api/signup', async (req, res) => 
-  {
+app.post('/api/signup', async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
@@ -114,14 +105,51 @@ app.listen(PORT, () => {
 });
 
 app.get('/api/users', async (req, res) => {
-  try 
-  {
+  try {
     const users = await User.find().select('-password'); 
     res.status(200).json(users);
-  } catch (error)
-  {
+  } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error fetching users" });
+  }
+});
+
+app.get('/api/user/:userId', async (req, res) => {
+  try {
+    console.log("Fetching user with ID:", req.params.userId);
+    const user = await User.findById(req.params.userId).select('-password');
+    
+    if (!user) {
+      console.log("Could not find user in database!");
+      return res.status(404).json({ message: "User not found" });
+    }
+    
+    console.log("User found:", user.name);
+    res.status(200).json(user);
+  } catch (error) {
+    console.log("Server crash error:", error.message);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+app.put('/api/user/:userId', async (req, res) => {
+  try {
+    const { name, email } = req.body;
+    
+    // Find the user by ID and update their name and email
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.userId,
+      { name, email },
+      { new: true } // tells Mongoose to return the newly updated document
+    ).select('-password');
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    
+    res.status(200).json({ message: "Profile updated successfully!", user: updatedUser });
+  } catch (error) {
+    res.status(500).json({ message: "Error updating profile", error: error.message });
   }
 });
 
@@ -177,7 +205,6 @@ app.post('/api/upload-audio', upload.single('audio'), async (req, res) => {
 app.get('/api/sessions/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-
     const sessions = await SpeechSession.find({ userId: userId }).sort({ createdAt: -1 });
 
     if (!sessions || sessions.length === 0) {
@@ -194,27 +221,36 @@ app.get('/api/stats/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const mongoose = require('mongoose');
+    const sessions = await SpeechSession.find({ userId: userId }).sort({ createdAt: 1 });
 
     const stats = await SpeechSession.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-
       {
         $group: {
           _id: "$userId",
           totalSessions: { $sum: 1 },
-          avgWPM: { $avg: "$wpmScore" },
+          avgWPM: { $avg: "$wpmScore" }, 
           avgEnergy: { $avg: "$energyScore" },
           totalFillers: { $sum: "$fillerWordCount" }
         }
       }
     ]);
 
-    if (stats.length === 0) {
-      return res.status(404).json({ message: "No data found for this user." });
+    if (sessions.length === 0) {
+      return res.status(200).json({ 
+        message: "No data found for this user yet.",
+        sessions: [], 
+        overallStats: null 
+      });
     }
 
-    res.status(200).json(stats[0]);
+    res.status(200).json({
+      sessions: sessions,
+      overallStats: stats[0]
+    });
+
   } catch (error) {
+    console.error("Error fetching stats:", error);
     res.status(500).json({ message: "Error calculating stats", error: error.message });
   }
 });
@@ -222,6 +258,7 @@ app.get('/api/stats/:userId', async (req, res) => {
 app.post('/api/analyze-audio', upload.single('audio'), async (req, res) => {
   try {
     const filePath = req.file.path;
+    // Note: runYourAiModel needs to be defined somewhere in your backend if you plan to use it!
     const aiScores = await runYourAiModel(filePath); 
 
     fs.unlink(filePath, (err) => {
