@@ -1,0 +1,13 @@
+# Dependency folders
+node_modules/
+
+# Local environment variables (Passwords/Secrets)
+.env
+
+# Audio storage (We don't want to upload user recordings!)
+uploads/*.m4a
+uploads/*.wav
+uploads/
+
+# OS generated files
+.DS_Store
