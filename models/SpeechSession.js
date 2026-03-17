@@ -1,54 +1,54 @@
 const mongoose = require('mongoose');
 
 const speechSessionSchema = new mongoose.Schema({
-  //Links this practice session to the specific user who recorded it
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  //Pace Metric (Words per minute)
-  wpmScore: {
-    type: Number,
-    required: true
-  },
-  //Clarity Metric (Counting "um", "uh", "like")
-  fillerWordCount: {
-    type: Number,
-    required: true
-  },
-  //Energy Metric (Overall volume/pitch rating)
-  energyScore: {
-    type: Number,
-    required: true
-  },
-  //Actual text of what they said (from the Whisper model)
-  transcription: {
-    type: String,
-    required: true
-  }
-}, { 
-  timestamps: true //Automatically saves the exact date and time of the practice
-});
-
-const SpeechSessionSchema = new mongoose.Schema({
+  // Links this practice session to the specific user who recorded it
   userId: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'User', 
     required: true 
   },
+  
+  // Tracks whether the AI evaluated this in English or Filipino
+  language: {
+    type: String,
+    enum: ['English', 'Filipino'],
+    default: 'English',
+    required: true
+  },
+
+  // Stores the physical file location: "uploads/ispeak_17154...m4a"
   audioPath: { 
     type: String, 
-    required: true //stores the folder path: "uploads/123456789.mp3"
+    required: true 
   },
-  wpmScore: { type: Number, default: 0 },
-  fillerWordCount: { type: Number, default: 0 },
-  energyScore: { type: Number, default: 0 },
-  transcription: { type: String, default: "" },
-  createdAt: { 
-    type: Date, 
-    default: Date.now 
+
+  // --- AI EVALUATION METRICS (Matched exactly to your Flutter Progress UI) ---
+  paceScore: { 
+    type: Number, 
+    default: 0 
+  },
+  clarityScore: { 
+    type: Number, 
+    default: 0 
+  },
+  energyScore: { 
+    type: Number, 
+    default: 0 
+  },
+  overallScore: { 
+    type: Number, 
+    default: 0 
+  },
+
+  // The actual text of what they said (from the Whisper model)
+  transcription: { 
+    type: String, 
+    default: "No transcription available." 
   }
+
+}, { 
+  // Automatically adds 'createdAt' and 'updatedAt' timestamps perfectly
+  timestamps: true 
 });
 
-module.exports = mongoose.model('SpeechSession', SpeechSessionSchema);
+module.exports = mongoose.model('SpeechSession', speechSessionSchema);

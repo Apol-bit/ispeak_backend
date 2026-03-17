@@ -1,19 +1,25 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
-  name: 
-  {
+  firstName: {
     type: String,
     required: true,
   },
-  email: 
-  {
+  lastName: {
     type: String,
     required: true,
-    unique: true, //Prevents duplicate accounts
   },
-  password: 
-  {
+  username: {
+    type: String,
+    required: true,
+    unique: true, 
+  },
+  email: {
+    type: String,
+    required: true,
+    unique: true, 
+  },
+  password: {
     type: String,
     required: true,
   },
@@ -21,10 +27,19 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: ['user', 'admin'], 
     default: 'user'          
+  },
+  status: {
+    type: String,
+    enum: ['Active', 'Banned'],
+    default: 'Active'
+  },
+  lastProfileUpdate: {
+    type: Date,
+    default: null
   }
 }, 
 { 
-  timestamps: true //Automatically adds 'createdAt' and 'updatedAt'
+  timestamps: true 
 });
 
 module.exports = mongoose.model('User', userSchema);

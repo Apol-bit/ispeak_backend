@@ -2,14 +2,18 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs'); 
-const User = require('./models/User');
-const SpeechSession = require('./models/SpeechSession'); 
 const jwt = require('jsonwebtoken'); 
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios'); 
+const FormData = require('form-data'); 
 require('dotenv').config();
 
+const User = require('./models/User');
+const SpeechSession = require('./models/SpeechSession'); 
+
+// MULTER CONFIG
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/'); 
@@ -18,39 +22,44 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + '-' + file.originalname);
   }
 });
-
 const upload = multer({ storage: storage });
 
 const app = express();
-
 app.use(cors());
 app.use(express.json()); 
 
+// MONGODB CONNECTION
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('Successfully connected to MongoDB!'))
   .catch((err) => console.error('MongoDB connection error:', err));
 
+// ==========================================
+// AUTHENTICATION ROUTES 
+// ==========================================
 
 app.post('/api/signup', async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { firstName, lastName, username, email, password } = req.body;
+    
+    const existingEmail = await User.findOne({ email });
+    if (existingEmail) return res.status(400).json({ message: 'Email already in use!' });
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: 'Email already in use!' });
-    }
+    const existingUsername = await User.findOne({ username });
+    if (existingUsername) return res.status(400).json({ message: 'Username is already taken!' });
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const newUser = new User({
-      name,
+      firstName,
+      lastName,
+      username,
       email,
       password: hashedPassword,
+      status: 'Active'
     });
 
     await newUser.save();
-
     res.status(201).json({ message: 'Account created successfully!' });
   } catch (error) {
     console.error('Sign Up Error:', error);
@@ -61,16 +70,18 @@ app.post('/api/signup', async (req, res) => {
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: 'Invalid email or password' });
+
+    if (!user) return res.status(400).json({ message: 'Invalid email or password' });
+
+    if (user.status === 'Banned') {
+      return res.status(403).json({ 
+        message: 'Your account has been suspended. Please contact the administrator.' 
+      });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: 'Invalid email or password' });
-    }
+    if (!isMatch) return res.status(400).json({ message: 'Invalid email or password' });
 
     const token = jwt.sign(
       { userId: user._id, role: user.role }, 
@@ -81,197 +92,247 @@ app.post('/api/login', async (req, res) => {
     res.status(200).json({
       message: 'Login successful!',
       token: token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role
+      user: { 
+        id: user._id, 
+        firstName: user.firstName, 
+        lastName: user.lastName, 
+        username: user.username, 
+        email: user.email, 
+        role: user.role 
       }
     });
-
   } catch (error) {
-    console.error('Login Error:', error);
     res.status(500).json({ message: 'Server error during login' });
   }
 });
 
-app.get('/', (req, res) => {
-  res.send('iSpeak API is running!');
-});
-
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+// ==========================================
+// ADMIN MANAGEMENT ROUTES 
+// ==========================================
 
 app.get('/api/users', async (req, res) => {
   try {
     const users = await User.find().select('-password'); 
     res.status(200).json(users);
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: "Server error fetching users" });
   }
 });
 
-app.get('/api/user/:userId', async (req, res) => {
+app.patch('/api/users/:id/status', async (req, res) => {
   try {
-    console.log("Fetching user with ID:", req.params.userId);
-    const user = await User.findById(req.params.userId).select('-password');
-    
-    if (!user) {
-      console.log("Could not find user in database!");
-      return res.status(404).json({ message: "User not found" });
-    }
-    
-    console.log("User found:", user.name);
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    user.status = user.status === 'Banned' ? 'Active' : 'Banned';
+    await user.save();
     res.status(200).json(user);
   } catch (error) {
-    console.log("Server crash error:", error.message);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ message: "Error updating status" });
+  }
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ message: "User deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// USER PROFILE & SESSIONS
+// ==========================================
+
+app.get('/api/user/:userId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId).select('-password');
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.status(200).json(user);
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
   }
 });
 
 app.put('/api/user/:userId', async (req, res) => {
   try {
-    const { name, email } = req.body;
+    const { firstName, lastName, username } = req.body;
     
-    // Find the user by ID and update their name and email
+    const currentUser = await User.findById(req.params.userId);
+    if (!currentUser) return res.status(404).json({ message: "User not found" });
+
+    const isChangingName = 
+      (firstName && firstName !== currentUser.firstName) || 
+      (lastName && lastName !== currentUser.lastName);
+
+    if (isChangingName && currentUser.lastProfileUpdate) {
+      const daysSinceLastUpdate = (Date.now() - currentUser.lastProfileUpdate.getTime()) / (1000 * 60 * 60 * 24);
+      
+      if (daysSinceLastUpdate < 30) {
+        const daysLeft = Math.ceil(30 - daysSinceLastUpdate);
+        return res.status(400).json({ 
+          message: `You can only change your First/Last name once every 30 days. Please wait ${daysLeft} more days.` 
+        });
+      }
+    }
+
+    if (username && username !== currentUser.username) {
+      const usernameExists = await User.findOne({ username, _id: { $ne: req.params.userId } });
+      if (usernameExists) return res.status(400).json({ message: "Username is already taken by another user." });
+    }
+
+    const updateData = { firstName, lastName, username };
+    
+    if (isChangingName) {
+      updateData.lastProfileUpdate = new Date();
+    }
+
     const updatedUser = await User.findByIdAndUpdate(
-      req.params.userId,
-      { name, email },
-      { new: true } // tells Mongoose to return the newly updated document
+      req.params.userId, 
+      updateData, 
+      { new: true, runValidators: true }
     ).select('-password');
 
-    if (!updatedUser) {
-      return res.status(404).json({ message: "User not found" });
-    }
-    
     res.status(200).json({ message: "Profile updated successfully!", user: updatedUser });
   } catch (error) {
-    res.status(500).json({ message: "Error updating profile", error: error.message });
+    console.error('Update Profile Error:', error);
+    res.status(500).json({ message: "Error updating profile" });
   }
 });
 
-app.post('/api/save-session', async (req, res) => {
+// ==========================================
+// AUDIO UPLOAD ROUTE 
+// ==========================================
+
+/* // ---------------------------------------------------------------------
+// FINAL PRODUCTION AI ROUTE (UNCOMMENT THIS WHEN FASTAPI IS READY)
+// ---------------------------------------------------------------------
+app.post('/api/upload-audio', upload.single('audio'), async (req, res) => {
   try {
-    const { userId, wpmScore, fillerWordCount, energyScore, transcription } = req.body;
-    const existingUser = await User.findById(userId);
-    if (!existingUser) {
-      return res.status(404).json({ message: "Security Alert: User not found! Cannot save score." });
+    const { userId, language } = req.body; 
+    if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
+
+    const formData = new FormData();
+    formData.append('audio', fs.createReadStream(req.file.path)); 
+    formData.append('language', language || 'English'); 
+
+    let aiScores;
+    try {
+      const fastApiResponse = await axios.post('http://127.0.0.1:8000/analyze', formData, {
+        headers: { ...formData.getHeaders() }
+      });
+      aiScores = fastApiResponse.data; 
+    } catch (aiError) {
+      console.error("FastAPI Connection Error:", aiError.message);
+      return res.status(503).json({ message: "AI Evaluation Engine offline." });
     }
 
-    const newSession = new SpeechSession({
-      user: userId,
-      wpmScore,
-      fillerWordCount,
-      energyScore,
-      transcription
+    const newSession = new SpeechSession({ 
+      userId: userId, 
+      language: language || 'English',
+      audioPath: req.file.path,
+      paceScore: aiScores.paceScore || 0,
+      clarityScore: aiScores.clarityScore || 0,
+      energyScore: aiScores.energyScore || 0,
+      overallScore: aiScores.overallScore || 0,
+      transcription: aiScores.transcription || "No transcription available."
     });
-
+    
     await newSession.save();
-
-    res.status(201).json({ message: "Speech session saved successfully!", session: newSession });
+    res.status(200).json({ message: "Audio analyzed successfully!", sessionId: newSession._id, scores: aiScores });
   } catch (error) {
-    res.status(500).json({ message: "Error saving session", error: error.message });
+    console.error('Audio Upload/AI Error:', error);
+    res.status(500).json({ message: "Internal server error during audio processing." });
   }
 });
+*/
 
+// ---------------------------------------------------------------------
+// ACTIVE LOCAL ROUTE (Works right now without AI)
+// ---------------------------------------------------------------------
 app.post('/api/upload-audio', upload.single('audio'), async (req, res) => {
   try {
     const { userId } = req.body; 
+    
+    if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
 
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded!" });
-    }
-
-    const newSession = new SpeechSession({
-      userId: userId,
-      audioPath: req.file.path, 
+    // Simply save the audio file to the database so the app can proceed
+    const newSession = new SpeechSession({ 
+      userId: userId, 
+      audioPath: req.file.path 
+      // Scores will automatically default to 0 based on our schema
     });
-
+    
     await newSession.save();
 
     res.status(200).json({ 
-      message: "Audio caught and linked to database!", 
-      sessionId: newSession._id,
-      filePath: newSession.audioPath 
+      message: "Audio uploaded locally!", 
+      sessionId: newSession._id 
     });
+
   } catch (error) {
-    res.status(500).json({ message: "Error linking audio to database", error: error.message });
+    console.error('Audio Upload Error:', error);
+    res.status(500).json({ message: "Error saving audio locally" });
   }
 });
 
+
+// ==========================================
+// ANALYTICS & GLOBAL STATS
+// ==========================================
+
 app.get('/api/sessions/:userId', async (req, res) => {
   try {
-    const { userId } = req.params;
-    const sessions = await SpeechSession.find({ userId: userId }).sort({ createdAt: -1 });
-
-    if (!sessions || sessions.length === 0) {
-      return res.status(404).json({ message: "No sessions found for this user." });
-    }
-
+    const sessions = await SpeechSession.find({ userId: req.params.userId }).sort({ createdAt: -1 });
     res.status(200).json(sessions);
   } catch (error) {
-    res.status(500).json({ message: "Error fetching history", error: error.message });
+    res.status(500).json({ message: "Error fetching history" });
   }
 });
 
 app.get('/api/stats/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    const mongoose = require('mongoose');
-    const sessions = await SpeechSession.find({ userId: userId }).sort({ createdAt: 1 });
-
+    const sessions = await SpeechSession.find({ userId }).sort({ createdAt: 1 });
     const stats = await SpeechSession.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-      {
-        $group: {
-          _id: "$userId",
-          totalSessions: { $sum: 1 },
-          avgWPM: { $avg: "$wpmScore" }, 
-          avgEnergy: { $avg: "$energyScore" },
-          totalFillers: { $sum: "$fillerWordCount" }
-        }
+      { $group: { 
+          _id: "$userId", 
+          totalSessions: { $sum: 1 }, 
+          avgOverall: { $avg: "$overallScore" },
+          avgPace: { $avg: "$paceScore" }, 
+          avgClarity: { $avg: "$clarityScore" }, 
+          avgEnergy: { $avg: "$energyScore" } 
+        } 
       }
     ]);
-
-    if (sessions.length === 0) {
-      return res.status(200).json({ 
-        message: "No data found for this user yet.",
-        sessions: [], 
-        overallStats: null 
-      });
-    }
-
-    res.status(200).json({
-      sessions: sessions,
-      overallStats: stats[0]
-    });
-
+    res.status(200).json({ sessions, overallStats: stats[0] || null });
   } catch (error) {
-    console.error("Error fetching stats:", error);
-    res.status(500).json({ message: "Error calculating stats", error: error.message });
+    res.status(500).json({ message: "Error calculating stats" });
   }
 });
 
-app.post('/api/analyze-audio', upload.single('audio'), async (req, res) => {
+app.get('/api/admin/stats', async (req, res) => {
   try {
-    const filePath = req.file.path;
-    // Note: runYourAiModel needs to be defined somewhere in your backend if you plan to use it!
-    const aiScores = await runYourAiModel(filePath); 
-
-    fs.unlink(filePath, (err) => {
-      if (err) {
-        console.error("Warning: Could not delete audio file:", err);
-      } else {
-        console.log("Audio file deleted successfully to save server space.");
-      }
-    });
-
-    res.status(200).json({ message: "Analysis complete", scores: aiScores });
-
+    const totalUsers = await User.countDocuments();
+    const totalSessions = await SpeechSession.countDocuments();
+    const globalStats = await SpeechSession.aggregate([{ $group: { _id: null, avgOverall: { $avg: "$overallScore" } } }]);
+    res.status(200).json({ totalUsers, totalSessions, avgAppScore: Math.round(globalStats[0]?.avgOverall || 0) });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ message: "Error fetching stats" });
   }
 });
+
+app.get('/api/admin/recent-sessions', async (req, res) => {
+  try {
+    const recentSessions = await SpeechSession.find().sort({ createdAt: -1 }).limit(50);
+    res.status(200).json(recentSessions);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching recent sessions" });
+  }
+});
+
+// SERVER INIT
+app.get('/', (req, res) => res.send('iSpeak API is running!'));
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
