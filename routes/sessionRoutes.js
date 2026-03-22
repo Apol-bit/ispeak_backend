@@ -16,7 +16,10 @@ const upload = multer({ storage: storage });
 router.post('/upload-audio', upload.single('audio'), sessionController.uploadAudioLocal);
 router.get('/sessions/:userId', sessionController.getUserHistory);
 router.get('/stats/:userId', sessionController.getUserStats);
+
+// Admin Routes
 router.get('/admin/stats', sessionController.getAdminGlobalStats);
 router.get('/admin/recent-sessions', sessionController.getAdminRecentSessions);
+router.get('/admin/ai-logs', sessionController.getAdminRecentSessions); 
 
 module.exports = router;

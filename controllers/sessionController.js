@@ -88,7 +88,15 @@ exports.getUserStats = async (req, res) => {
     const sessions = await SpeechSession.find({ userId }).sort({ createdAt: 1 });
     const stats = await SpeechSession.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-      { $group: { _id: "$userId", totalSessions: { $sum: 1 }, avgOverall: { $avg: "$overallScore" }, avgPace: { $avg: "$paceScore" }, avgClarity: { $avg: "$clarityScore" }, avgEnergy: { $avg: "$energyScore" } } }
+      { $group: { 
+          _id: "$userId", 
+          totalSessions: { $sum: 1 }, 
+          avgOverall: { $avg: "$overallScore" }, 
+          avgWpm: { $avg: "$wpmScore" }, // UPDATED THIS LINE
+          avgClarity: { $avg: "$clarityScore" }, 
+          avgEnergy: { $avg: "$energyScore" } 
+        } 
+      }
     ]);
     res.status(200).json({ sessions, overallStats: stats[0] || null });
   } catch (error) {
@@ -107,9 +115,10 @@ exports.getAdminGlobalStats = async (req, res) => {
   }
 };
 
+// This works perfectly for BOTH the Dashboard and the AI Logs screen!
 exports.getAdminRecentSessions = async (req, res) => {
   try {
-    const recentSessions = await SpeechSession.find().sort({ createdAt: -1 }).limit(50);
+    const recentSessions = await SpeechSession.find().sort({ createdAt: -1 }).limit(100);
     res.status(200).json(recentSessions);
   } catch (error) {
     res.status(500).json({ message: "Error fetching recent sessions" });
