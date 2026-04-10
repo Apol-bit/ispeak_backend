@@ -7,10 +7,10 @@ const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
 
-// PRODUCTION AI ROUTE (Use this when FastAPI is running!)
-/* exports.uploadAudioAI = async (req, res) => {
+/* // PRODUCTION AI ROUTE (Uncomment this when FastAPI is running!)
+exports.uploadAudioAI = async (req, res) => {
   try {
-    const { userId, language } = req.body;
+    const { userId, language, challengeId, resourceId } = req.body;
     if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
 
     const formData = new FormData();
@@ -33,11 +33,14 @@ const FormData = require('form-data');
       language: language || 'English',
       audioPath: req.file.path,
       status: 'Completed',
-      paceScore: aiScores.paceScore || 0,
+      challengeData: challengeId || null,
+      scriptData: resourceId || null,
+      wpmScore: aiScores.paceScore || 0,
       clarityScore: aiScores.clarityScore || 0,
       energyScore: aiScores.energyScore || 0,
       overallScore: aiScores.overallScore || 0,
-      transcription: aiScores.transcription || "No transcription available."
+      transcription: aiScores.transcription || "No transcription available.",
+      aiFeedback: aiScores.feedback || "AI processed successfully."
     });
 
     await newSession.save();
@@ -46,19 +49,22 @@ const FormData = require('form-data');
     console.error('Audio Upload/AI Error:', error);
     res.status(500).json({ message: "Internal server error during audio processing." });
   }
-}; */
+}; 
+*/
 
 // ACTIVE LOCAL ROUTE (Works right now without the AI)
 exports.uploadAudioLocal = async (req, res) => {
   try {
-    const { userId, language } = req.body;
+    const { userId, language, challengeId, resourceId } = req.body;
     if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
 
     const newSession = new SpeechSession({ 
       userId: userId, 
       language: language || 'English',
       audioPath: req.file.path,
-      status: 'Completed' // Marks it green in the Admin Panel
+      status: 'Completed', // Marks it green in the Admin Panel
+      challengeData: challengeId || null,
+      scriptData: resourceId || null
     });
 
     await newSession.save();
@@ -76,9 +82,14 @@ exports.uploadAudioLocal = async (req, res) => {
 // ANALYTICS & STATS ROUTES
 exports.getUserHistory = async (req, res) => {
   try {
-    const sessions = await SpeechSession.find({ userId: req.params.userId }).sort({ createdAt: -1 });
+    const sessions = await SpeechSession.find({ userId: req.params.userId })
+        .sort({ createdAt: -1 })
+        .populate('challengeData') // Grabs the full challenge object
+        .populate('scriptData');   // Grabs the full script object
+        
     res.status(200).json(sessions);
   } catch (error) {
+    console.error("Error fetching history:", error);
     res.status(500).json({ message: "Error fetching history" });
   }
 };
@@ -86,7 +97,10 @@ exports.getUserHistory = async (req, res) => {
 exports.getUserStats = async (req, res) => {
   try {
     const { userId } = req.params;
-    const sessions = await SpeechSession.find({ userId }).sort({ createdAt: 1 });
+    const sessions = await SpeechSession.find({ userId })
+        .sort({ createdAt: 1 })
+        .populate('challengeData') // Grabs the full challenge object
+        .populate('scriptData');   // Grabs the full script object
 
     const stats = await SpeechSession.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },
@@ -103,6 +117,7 @@ exports.getUserStats = async (req, res) => {
 
     res.status(200).json({ sessions, overallStats: stats[0] || null });
   } catch (error) {
+    console.error("Error calculating stats:", error);
     res.status(500).json({ message: "Error calculating stats" });
   }
 };
@@ -121,7 +136,10 @@ exports.getAdminGlobalStats = async (req, res) => {
 
 exports.getAdminRecentSessions = async (req, res) => {
   try {
-    const recentSessions = await SpeechSession.find().sort({ createdAt: -1 }).limit(100);
+    const recentSessions = await SpeechSession.find()
+        .sort({ createdAt: -1 })
+        .limit(100)
+        .populate('userId', 'name email'); // Good practice for admin panels
     res.status(200).json(recentSessions);
   } catch (error) {
     res.status(500).json({ message: "Error fetching recent sessions" });
