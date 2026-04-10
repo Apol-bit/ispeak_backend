@@ -112,7 +112,15 @@ exports.getUserStats = async (req, res) => {
         
     const stats = await SpeechSession.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-      // ... rest of aggregation
+      { $group: { 
+          _id: "$userId", 
+          totalSessions: { $sum: 1 }, 
+          avgScore: { $avg: "$overallScore" },
+          avgPace: { $avg: "$paceScore" }, 
+          avgClarity: { $avg: "$clarityScore" }, 
+          avgEnergy: { $avg: "$energyScore" } 
+        } 
+      }
     ]);
 
     res.status(200).json({ sessions, overallStats: stats[0] || null });
