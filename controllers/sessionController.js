@@ -83,19 +83,10 @@ exports.uploadAudioLocal = async (req, res) => {
 // ANALYTICS & STATS ROUTES
 exports.getUserHistory = async (req, res) => {
   try {
-    const sessions = await SpeechSession.find({ userId: req.params.userId }).sort({ createdAt: -1 });
-    res.status(200).json(sessions);
-  } catch (error) {
-    res.status(500).json({ message: "Error fetching history" });
-  }
-};
-
-exports.getUserHistory = async (req, res) => {
-  try {
     const sessions = await SpeechSession.find({ userId: req.params.userId })
         .sort({ createdAt: -1 })
-        .populate('challengeId')  // ← ADD THIS
-        .populate('resourceId');  // ← ADD THIS
+        .populate('challengeId')
+        .populate('resourceId');
         
     res.status(200).json(sessions);
   } catch (error) {
@@ -109,14 +100,14 @@ exports.getUserStats = async (req, res) => {
     const { userId } = req.params;
     const sessions = await SpeechSession.find({ userId })
         .sort({ createdAt: 1 })
-        .populate('challengeId')  // ← ADD THIS
-        .populate('resourceId');  // ← ADD THIS
+        .populate('challengeId')
+        .populate('resourceId');
         
     const stats = await SpeechSession.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },
       { $group: { 
           _id: "$userId", 
-          totalSessions: { $sum: 1 }, 
+          totalSessions: { $sum: 1 },
           avgScore: { $avg: "$overallScore" },
           avgPace: { $avg: "$paceScore" }, 
           avgClarity: { $avg: "$clarityScore" }, 
@@ -148,9 +139,9 @@ exports.getAdminRecentSessions = async (req, res) => {
     const recentSessions = await SpeechSession.find()
         .sort({ createdAt: -1 })
         .limit(100)
-        .populate('userId', 'name email')
-        .populate('challengeId')  // ← ADD THIS
-        .populate('resourceId');  // ← ADD THIS
+        .populate('userId', 'firstName lastName email')
+        .populate('challengeId')
+        .populate('resourceId');
         
     res.status(200).json(recentSessions);
   } catch (error) {

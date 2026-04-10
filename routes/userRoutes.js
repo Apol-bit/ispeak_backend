@@ -5,6 +5,7 @@ const userController = require('../controllers/userController');
 // Admin Management
 router.get('/users', userController.getAllUsers);
 router.patch('/users/:id/status', userController.toggleUserStatus);
+router.put('/users/:id/archive', userController.archiveUser);
 router.delete('/users/:id', userController.deleteUser);
 
 // Profiles
