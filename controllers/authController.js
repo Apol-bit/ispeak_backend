@@ -35,6 +35,10 @@ exports.login = async (req, res) => {
       return res.status(403).json({ message: 'Your account has been suspended. Please contact the administrator.' });
     }
 
+    if (user.isArchived) {
+      return res.status(403).json({ message: "This account has been archived. Please contact support." });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: 'Invalid email or password' });
 

@@ -1,12 +1,41 @@
 const User = require('../models/User');
 
+
+// Archive a User
+exports.archiveUser = async (req, res) => {
+  try {
+    const userId = req.params.id;
+    
+    // Find user and set isArchived to true
+    const updatedUser = await User.findByIdAndUpdate(
+      userId, 
+      { 
+        isArchived: true, 
+        archivedAt: new Date() 
+      },
+      { new: true } // Returns the updated document
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json({ message: "User successfully archived", user: updatedUser });
+  } catch (error) {
+    console.error("Archive Error:", error);
+    res.status(500).json({ message: "Server error while archiving user" });
+  }
+};
 // Admin Management
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find().select('-password'); 
-    res.status(200).json(users);
+    // Send both lists so your Flutter Admin Panel can have an "Active" and "Archived" tab
+    const activeUsers = await User.find({ isArchived: false }).select('-password');
+    const archivedUsers = await User.find({ isArchived: true }).select('-password');
+
+    res.status(200).json({ activeUsers, archivedUsers });
   } catch (error) {
-    res.status(500).json({ message: "Server error fetching users" });
+    res.status(500).json({ message: "Error fetching users" });
   }
 };
 

@@ -57,6 +57,8 @@ exports.uploadAudioLocal = async (req, res) => {
     const { userId, language, challengeId, resourceId } = req.body;
     if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
 
+    const cleanId = (id) => (id && id !== 'null' && id !== 'undefined' && id !== '') ? id : null;
+
     const newSession = new SpeechSession({ 
       userId: userId, 
       language: language || 'English',
