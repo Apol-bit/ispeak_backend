@@ -13,9 +13,6 @@ exports.uploadAudioAI = async (req, res) => {
     const { userId, language, challengeId, resourceId } = req.body;
     if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
 
-    // The Null Interceptor
-    const cleanId = (id) => (id && id !== 'null' && id !== 'undefined' && id !== '') ? id : null;
-
     const formData = new FormData();
     formData.append('audio', fs.createReadStream(req.file.path)); 
     formData.append('language', language || 'English');
@@ -36,14 +33,13 @@ exports.uploadAudioAI = async (req, res) => {
       language: language || 'English',
       audioPath: req.file.path,
       status: 'Completed',
-      challengeData: cleanId(challengeId),
-      scriptData: cleanId(resourceId),
+      challengeId: challengeId,
+      resourceId: resourceId,
       paceScore: aiScores.paceScore || 0,
       clarityScore: aiScores.clarityScore || 0,
       energyScore: aiScores.energyScore || 0,
       overallScore: aiScores.overallScore || 0,
-      transcription: aiScores.transcription || "No transcription available.",
-      aiFeedback: aiScores.feedback || "AI processed successfully."
+      transcription: aiScores.transcription || "No transcription available."
     });
 
     await newSession.save();
@@ -61,22 +57,13 @@ exports.uploadAudioLocal = async (req, res) => {
     const { userId, language, challengeId, resourceId } = req.body;
     if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
 
-    // THE BUG FIX: Intercepts the word "null" from Flutter
-    const cleanId = (id) => (id && id !== 'null' && id !== 'undefined' && id !== '') ? id : null;
-
     const newSession = new SpeechSession({ 
       userId: userId, 
       language: language || 'English',
       audioPath: req.file.path,
-      status: 'Completed', 
-      challengeData: cleanId(challengeId),
-      scriptData: cleanId(resourceId),
-      
-      // MOCK SCORES: Generates random scores between 75 and 95 so your dashboard works!
-      paceScore: Math.floor(Math.random() * 20) + 75,
-      clarityScore: Math.floor(Math.random() * 20) + 75,
-      energyScore: Math.floor(Math.random() * 20) + 75,
-      overallScore: Math.floor(Math.random() * 20) + 75,
+      status: 'Completed',
+      challengeId: challengeId,
+      resourceId: resourceId
     });
 
     await newSession.save();
@@ -94,14 +81,9 @@ exports.uploadAudioLocal = async (req, res) => {
 // ANALYTICS & STATS ROUTES
 exports.getUserHistory = async (req, res) => {
   try {
-    const sessions = await SpeechSession.find({ userId: req.params.userId })
-        .sort({ createdAt: -1 })
-        .populate('challengeData') // Grabs the full challenge object
-        .populate('scriptData');   // Grabs the full script object
-        
+    const sessions = await SpeechSession.find({ userId: req.params.userId }).sort({ createdAt: -1 });
     res.status(200).json(sessions);
   } catch (error) {
-    console.error("Error fetching history:", error);
     res.status(500).json({ message: "Error fetching history" });
   }
 };
@@ -109,10 +91,7 @@ exports.getUserHistory = async (req, res) => {
 exports.getUserStats = async (req, res) => {
   try {
     const { userId } = req.params;
-    const sessions = await SpeechSession.find({ userId })
-        .sort({ createdAt: 1 })
-        .populate('challengeData') 
-        .populate('scriptData');   
+    const sessions = await SpeechSession.find({ userId }).sort({ createdAt: 1 });
 
     const stats = await SpeechSession.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },
@@ -120,7 +99,7 @@ exports.getUserStats = async (req, res) => {
           _id: "$userId", 
           totalSessions: { $sum: 1 }, 
           avgOverall: { $avg: "$overallScore" }, 
-          avgPace: { $avg: "$paceScore" }, // Reverted back to paceScore
+          avgWpm: { $avg: "$wpmScore" },
           avgClarity: { $avg: "$clarityScore" }, 
           avgEnergy: { $avg: "$energyScore" } 
         } 
@@ -129,7 +108,6 @@ exports.getUserStats = async (req, res) => {
 
     res.status(200).json({ sessions, overallStats: stats[0] || null });
   } catch (error) {
-    console.error("Error calculating stats:", error);
     res.status(500).json({ message: "Error calculating stats" });
   }
 };
@@ -148,10 +126,7 @@ exports.getAdminGlobalStats = async (req, res) => {
 
 exports.getAdminRecentSessions = async (req, res) => {
   try {
-    const recentSessions = await SpeechSession.find()
-        .sort({ createdAt: -1 })
-        .limit(100)
-        .populate('userId', 'name email'); 
+    const recentSessions = await SpeechSession.find().sort({ createdAt: -1 }).limit(100);
     res.status(200).json(recentSessions);
   } catch (error) {
     res.status(500).json({ message: "Error fetching recent sessions" });
