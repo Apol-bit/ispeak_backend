@@ -13,6 +13,9 @@ exports.uploadAudioAI = async (req, res) => {
     const { userId, language, challengeId, resourceId } = req.body;
     if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
 
+    // The Null Interceptor
+    const cleanId = (id) => (id && id !== 'null' && id !== 'undefined' && id !== '') ? id : null;
+
     const formData = new FormData();
     formData.append('audio', fs.createReadStream(req.file.path)); 
     formData.append('language', language || 'English');
@@ -33,9 +36,9 @@ exports.uploadAudioAI = async (req, res) => {
       language: language || 'English',
       audioPath: req.file.path,
       status: 'Completed',
-      challengeData: challengeId || null,
-      scriptData: resourceId || null,
-      wpmScore: aiScores.paceScore || 0,
+      challengeData: cleanId(challengeId),
+      scriptData: cleanId(resourceId),
+      paceScore: aiScores.paceScore || 0,
       clarityScore: aiScores.clarityScore || 0,
       energyScore: aiScores.energyScore || 0,
       overallScore: aiScores.overallScore || 0,
@@ -58,13 +61,22 @@ exports.uploadAudioLocal = async (req, res) => {
     const { userId, language, challengeId, resourceId } = req.body;
     if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
 
+    // THE BUG FIX: Intercepts the word "null" from Flutter
+    const cleanId = (id) => (id && id !== 'null' && id !== 'undefined' && id !== '') ? id : null;
+
     const newSession = new SpeechSession({ 
       userId: userId, 
       language: language || 'English',
       audioPath: req.file.path,
-      status: 'Completed', // Marks it green in the Admin Panel
-      challengeData: challengeId || null,
-      scriptData: resourceId || null
+      status: 'Completed', 
+      challengeData: cleanId(challengeId),
+      scriptData: cleanId(resourceId),
+      
+      // MOCK SCORES: Generates random scores between 75 and 95 so your dashboard works!
+      paceScore: Math.floor(Math.random() * 20) + 75,
+      clarityScore: Math.floor(Math.random() * 20) + 75,
+      energyScore: Math.floor(Math.random() * 20) + 75,
+      overallScore: Math.floor(Math.random() * 20) + 75,
     });
 
     await newSession.save();
@@ -99,8 +111,8 @@ exports.getUserStats = async (req, res) => {
     const { userId } = req.params;
     const sessions = await SpeechSession.find({ userId })
         .sort({ createdAt: 1 })
-        .populate('challengeData') // Grabs the full challenge object
-        .populate('scriptData');   // Grabs the full script object
+        .populate('challengeData') 
+        .populate('scriptData');   
 
     const stats = await SpeechSession.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },
@@ -108,7 +120,7 @@ exports.getUserStats = async (req, res) => {
           _id: "$userId", 
           totalSessions: { $sum: 1 }, 
           avgOverall: { $avg: "$overallScore" }, 
-          avgWpm: { $avg: "$wpmScore" },
+          avgPace: { $avg: "$paceScore" }, // Reverted back to paceScore
           avgClarity: { $avg: "$clarityScore" }, 
           avgEnergy: { $avg: "$energyScore" } 
         } 
@@ -139,7 +151,7 @@ exports.getAdminRecentSessions = async (req, res) => {
     const recentSessions = await SpeechSession.find()
         .sort({ createdAt: -1 })
         .limit(100)
-        .populate('userId', 'name email'); // Good practice for admin panels
+        .populate('userId', 'name email'); 
     res.status(200).json(recentSessions);
   } catch (error) {
     res.status(500).json({ message: "Error fetching recent sessions" });

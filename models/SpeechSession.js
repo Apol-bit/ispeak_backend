@@ -16,7 +16,7 @@ const speechSessionSchema = new mongoose.Schema({
     required: true
   },
 
-  // Stores the physical file location: "uploads/ispeak_17154...m4a"
+  // Stores the physical file location
   audioPath: { 
     type: String, 
     required: true 
@@ -28,7 +28,7 @@ const speechSessionSchema = new mongoose.Schema({
     default: 0
   },
 
-  // AI Processing Status (Pending, Completed, Failed)
+  // AI Processing Status
   status: {
     type: String,
     enum: ['Pending', 'Completed', 'Failed'],
@@ -39,15 +39,16 @@ const speechSessionSchema = new mongoose.Schema({
   // Tells MongoDB to link this session to specific challenges/scripts
   challengeData: { 
     type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Challenge' // Ensure this matches your actual Challenge model name
+    ref: 'Challenge' 
   },
   scriptData: { 
     type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Script'    // Ensure this matches your actual Script model name
+    ref: 'Script'    
   },
 
   // --- AI EVALUATION METRICS ---
-  wpmScore: { 
+  // Reverted back to paceScore to match Flutter!
+  paceScore: { 
     type: Number, 
     default: 0 
   },
@@ -64,7 +65,7 @@ const speechSessionSchema = new mongoose.Schema({
     default: 0 
   },
 
-  // The actual text of what they said (from the Whisper model)
+  // The actual text of what they said
   transcription: { 
     type: String, 
     default: "No transcription available." 
@@ -77,7 +78,6 @@ const speechSessionSchema = new mongoose.Schema({
   }
 
 }, { 
-  // Automatically adds 'createdAt' and 'updatedAt' timestamps
   timestamps: true 
 });
 
