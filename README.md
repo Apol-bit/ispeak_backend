@@ -1,4 +1,4 @@
-# iSpeak Backend 🎙️
+# iSpeak Backend
 
 This is the Node.js backend for the **iSpeak** Public Speaking Assistant. It handles user authentication, session management, and audio file processing.
 
@@ -7,7 +7,7 @@ This is the Node.js backend for the **iSpeak** Public Speaking Assistant. It han
 - **Speech Sessions:** Stores WPM, Filler Word counts, and Energy scores in MongoDB.
 - **Audio Uploads:** Handles `.m4a` files via Multer and stores them for AI analysis.
 
-## 🛠️ Setup Instructions
+## Setup Instructions
 
 ### 1. Prerequisites
 Ensure you have [Node.js](https://nodejs.org/) installed.
