@@ -7,19 +7,18 @@ const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
 
-/* // PRODUCTION AI ROUTE (Uncomment this when FastAPI is running!)
 exports.uploadAudioAI = async (req, res) => {
   try {
     const { userId, language, challengeId, resourceId } = req.body;
     if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
 
     const formData = new FormData();
-    formData.append('audio', fs.createReadStream(req.file.path)); 
-    formData.append('language', language || 'English');
-
+    formData.append('file', fs.createReadStream(req.file.path)); // Changed 'audio' to 'file' to match FastAPI UploadFile name
+    
     let aiScores;
     try {
-      const fastApiResponse = await axios.post('http://127.0.0.1:8000/analyze', formData, {
+      // Point exactly to the Python /transcribe route
+      const fastApiResponse = await axios.post('http://127.0.0.1:8000/transcribe', formData, {
         headers: { ...formData.getHeaders() }
       });
       aiScores = fastApiResponse.data; 
@@ -28,6 +27,7 @@ exports.uploadAudioAI = async (req, res) => {
       return res.status(503).json({ message: "AI Evaluation Engine offline." });
     }
 
+    // Map to the nested Python dictionary (aiScores.scores.pacing)
     const newSession = new SpeechSession({ 
       userId: userId, 
       language: language || 'English',
@@ -35,11 +35,11 @@ exports.uploadAudioAI = async (req, res) => {
       status: 'Completed',
       challengeId: challengeId,
       resourceId: resourceId,
-      paceScore: aiScores.paceScore || 0,
-      clarityScore: aiScores.clarityScore || 0,
-      energyScore: aiScores.energyScore || 0,
-      overallScore: aiScores.overallScore || 0,
-      transcription: aiScores.transcription || "No transcription available."
+      paceScore: aiScores?.scores?.pacing || 0,
+      clarityScore: aiScores?.scores?.clarity || 0,
+      energyScore: aiScores?.scores?.energy || 0,
+      overallScore: aiScores?.scores?.overall || 0,
+      transcription: aiScores?.transcription || "No transcription available."
     });
 
     await newSession.save();
@@ -48,9 +48,9 @@ exports.uploadAudioAI = async (req, res) => {
     console.error('Audio Upload/AI Error:', error);
     res.status(500).json({ message: "Internal server error during audio processing." });
   }
-}; 
-*/
+};
 
+/* 
 // ACTIVE LOCAL ROUTE (Works right now without the AI)
 exports.uploadAudioLocal = async (req, res) => {
   try {
@@ -79,7 +79,7 @@ exports.uploadAudioLocal = async (req, res) => {
     res.status(500).json({ message: "Error saving audio locally" });
   }
 };
-
+*/
 // ANALYTICS & STATS ROUTES
 exports.getUserHistory = async (req, res) => {
   try {

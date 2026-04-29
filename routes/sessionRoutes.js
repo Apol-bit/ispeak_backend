@@ -11,9 +11,8 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // Routes
-
-//router.post('/upload-audio', upload.single('audio'), sessionController.uploadAudioAI);
-router.post('/upload-audio', upload.single('audio'), sessionController.uploadAudioLocal);
+router.post('/upload-audio', upload.single('audio'), sessionController.uploadAudioAI);
+//router.post('/upload-audio', upload.single('audio'), sessionController.uploadAudioLocal);
 router.get('/sessions/:userId', sessionController.getUserHistory);
 router.get('/stats/:userId', sessionController.getUserStats);
 
