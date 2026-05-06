@@ -102,9 +102,7 @@ exports.uploadAudioLocal = async (req, res) => {
 exports.getUserHistory = async (req, res) => {
   try {
     const sessions = await SpeechSession.find({ userId: req.params.userId })
-      .sort({ createdAt: -1 })
-      .populate('challengeId')
-      .populate('resourceId');
+      .sort({ createdAt: -1 });
 
     res.status(200).json(sessions);
   } catch (error) {
@@ -117,9 +115,7 @@ exports.getUserStats = async (req, res) => {
   try {
     const { userId } = req.params;
     const sessions = await SpeechSession.find({ userId })
-      .sort({ createdAt: 1 })
-      .populate('challengeId')
-      .populate('resourceId');
+      .sort({ createdAt: 1 });
 
     const stats = await SpeechSession.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },
@@ -137,7 +133,8 @@ exports.getUserStats = async (req, res) => {
 
     res.status(200).json({ sessions, overallStats: stats[0] || null });
   } catch (error) {
-    res.status(500).json({ message: "Error calculating stats" });
+    console.error("Stats calculation error:", error);
+    res.status(500).json({ message: "Error calculating stats", error: error.message, stack: error.stack });
   }
 };
 
@@ -158,9 +155,7 @@ exports.getAdminRecentSessions = async (req, res) => {
     const recentSessions = await SpeechSession.find()
       .sort({ createdAt: -1 })
       .limit(100)
-      .populate('userId', 'firstName lastName email')
-      .populate('challengeId')
-      .populate('resourceId');
+      .populate('userId', 'firstName lastName email');
 
     res.status(200).json(recentSessions);
   } catch (error) {
