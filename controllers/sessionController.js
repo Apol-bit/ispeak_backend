@@ -34,10 +34,9 @@ exports.uploadAudioAI = async (req, res) => {
     const overallScore = aiScores?.scores?.overall || 0;
     const transcription = aiScores?.transcription || "No transcription available.";
 
-    // Extract raw counts for the Flutter Results Page
-    // If Python names these something else, adjust 'wpm' and 'filler_words' here!
-    const wpmScore = aiScores?.wpm || aiScores?.metrics?.wpm || 0;
-    const fillerWordCount = aiScores?.filler_words || aiScores?.metrics?.filler_count || 0;
+    // Extract raw counts using the exact keys from Python
+    const wpmScore = aiScores?.pacing?.wpm || 0;
+    const fillerWordCount = aiScores?.fillers?.count || 0;
 
     // Generate AI feedback from the response data
     const pronunciationMsg = aiScores?.pronunciation?.message || '';
@@ -92,7 +91,7 @@ exports.getUserStats = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    //Safety check to prevent MongoDB from crashing the server
+    // Safety check to prevent MongoDB from crashing the server
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "Invalid User ID format", sessions: [], overallStats: null });
     }
