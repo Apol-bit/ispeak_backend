@@ -13,7 +13,7 @@ exports.uploadAudioAI = async (req, res) => {
     if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
 
     const formData = new FormData();
-    formData.append('file', fs.createReadStream(req.file.path)); // Changed 'audio' to 'file' to match FastAPI UploadFile name
+    formData.append('file', fs.createReadStream(req.file.path));
 
     let aiScores;
     try {
@@ -27,12 +27,17 @@ exports.uploadAudioAI = async (req, res) => {
       return res.status(503).json({ message: "AI Evaluation Engine offline." });
     }
 
-    // Extract scores from the nested Python dictionary (aiScores.scores.pacing)
+    // Extract out-of-100 scores from the nested Python dictionary
     const paceScore = aiScores?.scores?.pacing || 0;
     const clarityScore = aiScores?.scores?.clarity || 0;
     const energyScore = aiScores?.scores?.energy || 0;
     const overallScore = aiScores?.scores?.overall || 0;
     const transcription = aiScores?.transcription || "No transcription available.";
+
+    // Extract raw counts for the Flutter Results Page
+    // If Python names these something else, adjust 'wpm' and 'filler_words' here!
+    const wpmScore = aiScores?.wpm || aiScores?.metrics?.wpm || 0;
+    const fillerWordCount = aiScores?.filler_words || aiScores?.metrics?.filler_count || 0;
 
     // Generate AI feedback from the response data
     const pronunciationMsg = aiScores?.pronunciation?.message || '';
@@ -54,13 +59,15 @@ exports.uploadAudioAI = async (req, res) => {
       clarityScore,
       energyScore,
       overallScore,
+      wpmScore,
+      fillerWordCount,
       transcription,
       aiFeedback
     });
 
     await newSession.save();
 
-    // Return the full saved session document so Flutter gets flat keys (overallScore, paceScore, etc.)
+    // Return the full saved session document so Flutter gets flat keys
     res.status(200).json(newSession.toObject());
   } catch (error) {
     console.error('Audio Upload/AI Error:', error);
@@ -68,36 +75,6 @@ exports.uploadAudioAI = async (req, res) => {
   }
 };
 
-/* 
-// ACTIVE LOCAL ROUTE (Works right now without the AI)
-exports.uploadAudioLocal = async (req, res) => {
-  try {
-    const { userId, language, challengeId, resourceId } = req.body;
-    if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
-
-    const cleanId = (id) => (id && id !== 'null' && id !== 'undefined' && id !== '') ? id : null;
-
-    const newSession = new SpeechSession({ 
-      userId: userId, 
-      language: language || 'English',
-      audioPath: req.file.path,
-      status: 'Completed',
-      challengeId: challengeId,
-      resourceId: resourceId
-    });
-
-    await newSession.save();
-
-    res.status(200).json({ 
-      message: "Audio uploaded locally (AI Disabled)!", 
-      sessionId: newSession._id 
-    });
-  } catch (error) {
-    console.error('Audio Upload Error:', error);
-    res.status(500).json({ message: "Error saving audio locally" });
-  }
-};
-*/
 // ANALYTICS & STATS ROUTES
 exports.getUserHistory = async (req, res) => {
   try {
@@ -114,6 +91,12 @@ exports.getUserHistory = async (req, res) => {
 exports.getUserStats = async (req, res) => {
   try {
     const { userId } = req.params;
+
+    //Safety check to prevent MongoDB from crashing the server
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid User ID format", sessions: [], overallStats: null });
+    }
+
     const sessions = await SpeechSession.find({ userId })
       .sort({ createdAt: 1 });
 
