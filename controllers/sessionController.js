@@ -1,9 +1,11 @@
 const SpeechSession = require('../models/SpeechSession');
+const LearningResource = require('../models/LearningResource');
 const User = require('../models/User');
 const mongoose = require('mongoose');
 
 // Required for the AI FastAPI Connection
 const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
 const FormData = require('form-data');
 
@@ -14,6 +16,23 @@ exports.uploadAudioAI = async (req, res) => {
 
     const formData = new FormData();
     formData.append('file', fs.createReadStream(req.file.path));
+
+    // Look up the resource to get reference audio path (if it exists)
+    let referenceAudioPath = null;
+    if (resourceId && mongoose.Types.ObjectId.isValid(resourceId)) {
+      const resource = await LearningResource.findById(resourceId);
+      if (resource && resource.referenceAudioPath) {
+        referenceAudioPath = resource.referenceAudioPath;
+      }
+    }
+
+    // If reference audio exists, attach it for comparison scoring
+    if (referenceAudioPath) {
+      const absRefPath = path.resolve(referenceAudioPath);
+      if (fs.existsSync(absRefPath)) {
+        formData.append('reference_audio', fs.createReadStream(absRefPath));
+      }
+    }
 
     let aiScores;
     try {
@@ -38,6 +57,20 @@ exports.uploadAudioAI = async (req, res) => {
     const wpmScore = aiScores?.pacing?.wpm || 0;
     const fillerWordCount = aiScores?.fillers?.count || 0;
 
+    // Extract word-level timestamps for karaoke teleprompter
+    const wordTimestamps = aiScores?.word_timestamps || [];
+
+    // Calculate audio duration from word timestamps or file size
+    let durationSeconds = 0;
+    if (wordTimestamps.length > 0) {
+      // Use the last word's end time as the duration
+      durationSeconds = Math.round(wordTimestamps[wordTimestamps.length - 1].end || 0);
+    } else {
+      // Fallback: estimate from file size (WAV 16kHz, 16-bit, mono = 32000 bytes/sec)
+      const fileStats = fs.statSync(req.file.path);
+      durationSeconds = Math.round(fileStats.size / 32000);
+    }
+
     // Generate AI feedback from the response data
     const pronunciationMsg = aiScores?.pronunciation?.message || '';
     const feedbackParts = [];
@@ -51,6 +84,7 @@ exports.uploadAudioAI = async (req, res) => {
       userId: userId,
       language: language || 'English',
       audioPath: req.file.path,
+      durationSeconds,
       status: 'Completed',
       challengeId: challengeId,
       resourceId: resourceId,
@@ -61,7 +95,8 @@ exports.uploadAudioAI = async (req, res) => {
       wpmScore,
       fillerWordCount,
       transcription,
-      aiFeedback
+      aiFeedback,
+      wordTimestamps
     });
 
     await newSession.save();

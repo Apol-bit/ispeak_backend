@@ -23,7 +23,7 @@ const learningResourceSchema = new mongoose.Schema({
   // Classification Tags
   language: { 
     type: String, 
-    enum: ['English', 'Filipino', 'Bilingual', 'None'], 
+    enum: ['English', 'Filipino', 'Taglish', 'None'], 
     default: 'English' 
   },
   difficulty: { 
@@ -47,6 +47,22 @@ const learningResourceSchema = new mongoose.Schema({
   content: { 
     type: String, 
     default: "" // The actual long-form text they read aloud
+  },
+
+  // Reference Audio (uploaded by Validator)
+  // TODO [CLOUD]: When migrating to cloud storage (S3/GCS), replace local path
+  //   with the full cloud URL. Update resourceController.js upload logic accordingly.
+  referenceAudioPath: {
+    type: String,
+    default: ""
+  },
+  transcript: {
+    type: String,
+    default: ""
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   },
 
   // For Challenges

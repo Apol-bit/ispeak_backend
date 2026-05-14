@@ -8,7 +8,7 @@ const speechSessionSchema = new mongoose.Schema({
   },
   language: {
     type: String,
-    enum: ['English', 'Filipino'],
+    enum: ['English', 'Filipino', 'Taglish'],
     default: 'English',
     required: true
   },
@@ -52,7 +52,13 @@ const speechSessionSchema = new mongoose.Schema({
   aiFeedback: {
     type: String,
     default: "AI is still processing or failed to generate feedback."
-  }
+  },
+  // Word-level timestamps from Whisper AI (for karaoke teleprompter replay)
+  wordTimestamps: [{
+    word: { type: String },
+    start: { type: Number },
+    end: { type: Number }
+  }]
 }, {
   timestamps: true
 });

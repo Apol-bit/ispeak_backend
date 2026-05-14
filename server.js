@@ -1,11 +1,17 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Serve uploaded files (reference audio, etc.) as static assets
+// TODO [CLOUD]: When migrating to cloud storage, remove this static serving
+//   and serve files directly from S3/GCS URLs instead.
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Log incoming requests for debugging
 app.use((req, res, next) => {
