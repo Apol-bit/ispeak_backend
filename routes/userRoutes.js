@@ -12,5 +12,6 @@ router.delete('/users/:id', userController.deleteUser);
 // Profiles
 router.get('/user/:userId', userController.getUserProfile);
 router.put('/user/:userId', userController.updateUserProfile);
+router.patch('/users/:id/demographics', userController.saveDemographics);
 
 module.exports = router;

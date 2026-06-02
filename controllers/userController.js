@@ -101,7 +101,7 @@ exports.getUserProfile = async (req, res) => {
 
 exports.updateUserProfile = async (req, res) => {
   try {
-    const { firstName, lastName, username } = req.body;
+    const { firstName, lastName, username, age, gender, gradeLevel } = req.body;
     const currentUser = await User.findById(req.params.userId);
     if (!currentUser) return res.status(404).json({ message: "User not found" });
 
@@ -120,6 +120,9 @@ exports.updateUserProfile = async (req, res) => {
     }
 
     const updateData = { firstName, lastName, username };
+    if (age !== undefined) updateData.age = age;
+    if (gender !== undefined) updateData.gender = gender;
+    if (gradeLevel !== undefined) updateData.gradeLevel = gradeLevel;
     if (isChangingName) updateData.lastProfileUpdate = new Date();
 
     const updatedUser = await User.findByIdAndUpdate(req.params.userId, updateData, { new: true, runValidators: true }).select('-password');
@@ -127,5 +130,27 @@ exports.updateUserProfile = async (req, res) => {
   } catch (error) {
     console.error('Update Profile Error:', error);
     res.status(500).json({ message: "Error updating profile" });
+  }
+};
+
+exports.saveDemographics = async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { age, gender, gradeLevel, initialLevel } = req.body;
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { age, gender, gradeLevel, initialLevel },
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json({ message: "Demographics saved successfully!", user: updatedUser });
+  } catch (error) {
+    console.error("Save Demographics Error:", error);
+    res.status(500).json({ message: "Error saving demographics" });
   }
 };

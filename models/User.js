@@ -38,6 +38,23 @@ const userSchema = new mongoose.Schema({
     default: null
   },
 
+  age: {
+    type: Number,
+    default: null
+  },
+  gender: {
+    type: String,
+    default: null
+  },
+  gradeLevel: {
+    type: String,
+    default: null
+  },
+  initialLevel: {
+    type: String,
+    default: null
+  },
+
   isArchived: { 
     type: Boolean, 
     default: false 
