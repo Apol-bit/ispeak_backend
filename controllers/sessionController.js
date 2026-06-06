@@ -57,7 +57,7 @@ exports.uploadAudioAI = async (req, res) => {
     const wpmScore = aiScores?.pacing?.wpm || 0;
     const fillerWordCount = aiScores?.fillers?.count || 0;
 
-    // Extract word-level timestamps for karaoke teleprompter
+    // Extract word-level timestamps for teleprompter
     const wordTimestamps = aiScores?.word_timestamps || [];
 
     // Calculate audio duration from word timestamps or file size

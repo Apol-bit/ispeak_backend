@@ -53,7 +53,7 @@ const speechSessionSchema = new mongoose.Schema({
     type: String,
     default: "AI is still processing or failed to generate feedback."
   },
-  // Word-level timestamps from Whisper AI (for karaoke teleprompter replay)
+  // Word-level timestamps from Whisper AI (for teleprompter replay)
   wordTimestamps: [{
     word: { type: String },
     start: { type: Number },
