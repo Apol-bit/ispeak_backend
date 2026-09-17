@@ -68,7 +68,7 @@ const learningResourceSchema = new mongoose.Schema({
   // For Challenges
   targetMetric: { 
     type: String, 
-    default: "" // e.g., "120-140 WPM"
+    default: "" // e.g., "120-150 WPM"
   },
   prompt: { 
     type: String, 

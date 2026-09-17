@@ -4,20 +4,31 @@ const userSchema = new mongoose.Schema({
   firstName: {
     type: String,
     required: true,
+    trim: true,
+    maxlength: 80,
   },
   lastName: {
     type: String,
     required: true,
+    trim: true,
+    maxlength: 80,
   },
   username: {
     type: String,
     required: true,
-    unique: true, 
+    unique: true,
+    trim: true,
+    lowercase: true,
+    minlength: 3,
+    maxlength: 40,
   },
   email: {
     type: String,
     required: true,
-    unique: true, 
+    unique: true,
+    trim: true,
+    lowercase: true,
+    maxlength: 254,
   },
   password: {
     type: String,
@@ -62,7 +73,15 @@ const userSchema = new mongoose.Schema({
   archivedAt: { 
     type: Date, 
     default: null 
-  }, 
+  },
+  termsAcceptedAt: {
+    type: Date,
+    default: null,
+  },
+  termsVersion: {
+    type: String,
+    default: null,
+  },
 },
   { timestamps: true });
 module.exports = mongoose.model('User', userSchema);

@@ -1,12 +1,27 @@
 const LearningResource = require('../models/LearningResource');
-const path = require('path');
-const fs = require('fs');
+const { storage } = require('../services/storageService');
+
+async function deleteStoredFile(key, context) {
+  if (!key) return;
+  try {
+    await storage.delete(key);
+  } catch (error) {
+    console.error(`Unable to delete ${context}:`, error);
+  }
+}
 
 // GET ALL RESOURCES
 exports.getAllResources = async (req, res) => {
   try {
     const filter = req.query.type ? { type: req.query.type } : {};
     const resources = await LearningResource.find(filter).sort({ createdAt: -1 });
+    if (req.auth.role === 'user') {
+      return res.status(200).json(resources.map((resource) => {
+        const safeResource = resource.toObject();
+        delete safeResource.referenceAudioPath;
+        return safeResource;
+      }));
+    }
     res.status(200).json(resources);
   } catch (error) {
     console.error("Error fetching resources:", error);
@@ -18,6 +33,8 @@ exports.getAllResources = async (req, res) => {
 exports.createResource = async (req, res) => {
   try {
     const resourceData = { ...req.body };
+    delete resourceData.referenceAudioPath;
+    resourceData.createdBy = req.auth.userId;
 
     // Parse JSON fields that may arrive as strings from multipart form
     if (typeof resourceData.tips === 'string') {
@@ -38,13 +55,16 @@ exports.createResource = async (req, res) => {
     //   Use a service like aws-sdk or @google-cloud/storage to upload req.file.buffer
     //   and store the returned URL in referenceAudioPath instead of the local path.
     if (req.file) {
-      resourceData.referenceAudioPath = req.file.path.replace(/\\/g, '/');
+      resourceData.referenceAudioPath = storage.toKey(req.file.path);
     }
 
     const newResource = new LearningResource(resourceData);
     await newResource.save();
     res.status(201).json({ message: "Resource created successfully!", resource: newResource });
   } catch (error) {
+    if (req.file) {
+      await deleteStoredFile(storage.toKey(req.file.path), 'failed resource upload');
+    }
     console.error("Error creating resource:", error);
     res.status(500).json({ message: "Error creating learning resource" });
   }
@@ -52,8 +72,11 @@ exports.createResource = async (req, res) => {
 
 // UPDATE A RESOURCE (supports multipart/form-data with reference audio upload)
 exports.updateResource = async (req, res) => {
+  let newAudioKey = null;
   try {
     const updateData = { ...req.body };
+    delete updateData.referenceAudioPath;
+    delete updateData.createdBy;
 
     // Parse JSON fields that may arrive as strings from multipart form
     if (typeof updateData.tips === 'string') {
@@ -71,26 +94,33 @@ exports.updateResource = async (req, res) => {
 
     // Handle reference audio file upload (from Validator)
     // TODO [CLOUD]: Same as createResource — replace with cloud upload logic.
+    let oldAudioKey = null;
     if (req.file) {
-      // Delete old audio file if it exists
       const oldResource = await LearningResource.findById(req.params.id);
-      if (oldResource && oldResource.referenceAudioPath) {
-        const oldPath = path.resolve(oldResource.referenceAudioPath);
-        if (fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
-        }
+      if (!oldResource) {
+        await deleteStoredFile(storage.toKey(req.file.path), 'orphaned resource upload');
+        return res.status(404).json({ message: "Resource not found" });
       }
-      updateData.referenceAudioPath = req.file.path.replace(/\\/g, '/');
+      oldAudioKey = oldResource.referenceAudioPath;
+      newAudioKey = storage.toKey(req.file.path);
+      updateData.referenceAudioPath = newAudioKey;
     }
 
     const updatedResource = await LearningResource.findByIdAndUpdate(
       req.params.id, 
       updateData, 
-      { new: true } 
+      { new: true, runValidators: true }
     );
-    if (!updatedResource) return res.status(404).json({ message: "Resource not found" });
+    if (!updatedResource) {
+      await deleteStoredFile(newAudioKey, 'orphaned replacement upload');
+      return res.status(404).json({ message: "Resource not found" });
+    }
+    if (oldAudioKey && oldAudioKey !== newAudioKey) {
+      await deleteStoredFile(oldAudioKey, 'replaced resource audio');
+    }
     res.status(200).json({ message: "Resource updated successfully!", resource: updatedResource });
   } catch (error) {
+    await deleteStoredFile(newAudioKey, 'failed replacement upload');
     console.error("Error updating resource:", error);
     res.status(500).json({ message: "Error updating resource" });
   }
@@ -102,16 +132,8 @@ exports.deleteResource = async (req, res) => {
     const resource = await LearningResource.findById(req.params.id);
     if (!resource) return res.status(404).json({ message: "Resource not found" });
 
-    // Clean up reference audio file
-    // TODO [CLOUD]: Replace with cloud storage delete (e.g., s3.deleteObject()).
-    if (resource.referenceAudioPath) {
-      const audioPath = path.resolve(resource.referenceAudioPath);
-      if (fs.existsSync(audioPath)) {
-        fs.unlinkSync(audioPath);
-      }
-    }
-
     await LearningResource.findByIdAndDelete(req.params.id);
+    await deleteStoredFile(resource.referenceAudioPath, 'deleted resource audio');
     res.status(200).json({ message: "Resource deleted successfully" });
   } catch (error) {
     console.error("Error deleting resource:", error);

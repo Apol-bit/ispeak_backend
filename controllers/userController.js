@@ -1,9 +1,25 @@
 const User = require('../models/User');
+const SpeechSession = require('../models/SpeechSession');
+const { storage } = require('../services/storageService');
+
+function exactCaseInsensitive(value) {
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped}$`, 'i');
+}
+
+function blocksSelfAdministration(req, res) {
+  if (req.auth?.userId === req.params.id) {
+    res.status(400).json({ message: 'Administrators cannot disable or delete their own account' });
+    return true;
+  }
+  return false;
+}
 
 
 // Archive a User
 exports.archiveUser = async (req, res) => {
   try {
+    if (blocksSelfAdministration(req, res)) return;
     const userId = req.params.id;
     
     // Find user and set isArchived to true
@@ -14,7 +30,7 @@ exports.archiveUser = async (req, res) => {
         archivedAt: new Date() 
       },
       { new: true } // Returns the updated document
-    );
+    ).select('-password');
 
     if (!updatedUser) {
       return res.status(404).json({ message: "User not found" });
@@ -41,7 +57,7 @@ exports.unarchiveUser = async (req, res) => {
         status: 'Active' 
       },
       { new: true } 
-    );
+    ).select('-password');
 
     if (!updatedUser) {
       return res.status(404).json({ message: "User not found" });
@@ -69,11 +85,14 @@ exports.getAllUsers = async (req, res) => {
 
 exports.toggleUserStatus = async (req, res) => {
   try {
+    if (blocksSelfAdministration(req, res)) return;
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: "User not found" });
     user.status = user.status === 'Banned' ? 'Active' : 'Banned';
     await user.save();
-    res.status(200).json(user);
+    const safeUser = user.toObject();
+    delete safeUser.password;
+    res.status(200).json(safeUser);
   } catch (error) {
     res.status(500).json({ message: "Error updating status" });
   }
@@ -81,10 +100,20 @@ exports.toggleUserStatus = async (req, res) => {
 
 exports.deleteUser = async (req, res) => {
   try {
-    await User.findByIdAndDelete(req.params.id);
+    if (blocksSelfAdministration(req, res)) return;
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const sessions = await SpeechSession.find({ userId: user._id }).select('audioPath');
+    for (const session of sessions) {
+      if (session.audioPath) await storage.delete(session.audioPath);
+    }
+    await SpeechSession.deleteMany({ userId: user._id });
+    await User.findByIdAndDelete(user._id);
     res.json({ message: "User deleted successfully" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Delete user error:', err);
+    res.status(500).json({ message: 'Error deleting user' });
   }
 };
 
@@ -115,11 +144,20 @@ exports.updateUserProfile = async (req, res) => {
     }
 
     if (username && username !== currentUser.username) {
-      const usernameExists = await User.findOne({ username, _id: { $ne: req.params.userId } });
+      const normalizedUsername = username.trim().toLowerCase();
+      const usernameExists = await User.findOne({
+        username: exactCaseInsensitive(normalizedUsername),
+        _id: { $ne: req.params.userId },
+      });
       if (usernameExists) return res.status(400).json({ message: "Username is already taken by another user." });
+      req.body.username = normalizedUsername;
     }
 
-    const updateData = { firstName, lastName, username };
+    const updateData = {
+      firstName: firstName?.trim(),
+      lastName: lastName?.trim(),
+      username: req.body.username?.trim(),
+    };
     if (age !== undefined) updateData.age = age;
     if (gender !== undefined) updateData.gender = gender;
     if (gradeLevel !== undefined) updateData.gradeLevel = gradeLevel;

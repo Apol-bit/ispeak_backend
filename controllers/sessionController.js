@@ -5,22 +5,52 @@ const mongoose = require('mongoose');
 
 // Required for the AI FastAPI Connection
 const fs = require('fs');
-const path = require('path');
 const axios = require('axios');
 const FormData = require('form-data');
+const { storage } = require('../services/storageService');
+
+function removeUploadedFile(filePath) {
+  if (!filePath) return;
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (error) {
+    console.error('Failed to clean up uploaded audio:', error.message);
+  }
+}
 
 exports.uploadAudioAI = async (req, res) => {
   try {
-    const { userId, language, challengeId, resourceId } = req.body;
+    const { language, challengeId, resourceId } = req.body;
+    const userId = req.auth.userId;
+    const sessionLanguage = language || 'English';
     if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
+    if (challengeId && !mongoose.Types.ObjectId.isValid(challengeId)) {
+      removeUploadedFile(req.file.path);
+      return res.status(400).json({ message: "Invalid Challenge ID format" });
+    }
+    if (resourceId && !mongoose.Types.ObjectId.isValid(resourceId)) {
+      removeUploadedFile(req.file.path);
+      return res.status(400).json({ message: "Invalid Resource ID format" });
+    }
+    if (!['English', 'Filipino', 'Taglish'].includes(sessionLanguage)) {
+      removeUploadedFile(req.file.path);
+      return res.status(400).json({ message: "Invalid language" });
+    }
+    const userExists = await User.exists({ _id: userId });
+    if (!userExists) {
+      removeUploadedFile(req.file.path);
+      return res.status(404).json({ message: "User not found" });
+    }
 
     const formData = new FormData();
     formData.append('file', fs.createReadStream(req.file.path));
+    formData.append('language', sessionLanguage);
 
-    // Look up the resource to get reference audio path (if it exists)
+    // Look up either practice resource type to get reference audio (if it exists).
     let referenceAudioPath = null;
-    if (resourceId && mongoose.Types.ObjectId.isValid(resourceId)) {
-      const resource = await LearningResource.findById(resourceId);
+    const scoringResourceId = resourceId || challengeId;
+    if (scoringResourceId) {
+      const resource = await LearningResource.findById(scoringResourceId);
       if (resource && resource.referenceAudioPath) {
         referenceAudioPath = resource.referenceAudioPath;
       }
@@ -28,21 +58,28 @@ exports.uploadAudioAI = async (req, res) => {
 
     // If reference audio exists, attach it for comparison scoring
     if (referenceAudioPath) {
-      const absRefPath = path.resolve(referenceAudioPath);
-      if (fs.existsSync(absRefPath)) {
-        formData.append('reference_audio', fs.createReadStream(absRefPath));
+      try {
+        formData.append('reference_audio', storage.openReadStream(referenceAudioPath));
+      } catch (error) {
+        console.error('Reference audio is unavailable:', error.message);
       }
     }
 
     let aiScores;
     try {
       // Point exactly to the Python /transcribe route
-      const fastApiResponse = await axios.post('http://127.0.0.1:8000/transcribe', formData, {
-        headers: { ...formData.getHeaders() }
+      const pythonUrl = (process.env.PYTHON_BACKEND_URL || 'http://127.0.0.1:8000')
+        .replace(/\/+$/, '');
+      const timeout = Number(process.env.PYTHON_TIMEOUT_MS || 300000);
+      const fastApiResponse = await axios.post(`${pythonUrl}/transcribe`, formData, {
+        headers: { ...formData.getHeaders() },
+        timeout: Number.isFinite(timeout) ? timeout : 300000,
+        maxBodyLength: 26 * 1024 * 1024
       });
       aiScores = fastApiResponse.data;
     } catch (aiError) {
       console.error("FastAPI Connection Error:", aiError.message);
+      removeUploadedFile(req.file.path);
       return res.status(503).json({ message: "AI Evaluation Engine offline." });
     }
 
@@ -56,20 +93,20 @@ exports.uploadAudioAI = async (req, res) => {
     // Extract raw counts using the exact keys from Python
     const wpmScore = aiScores?.pacing?.wpm || 0;
     const fillerWordCount = aiScores?.fillers?.count || 0;
+    const fillerAnalysisAvailable = aiScores?.fillers?.analysis_available === true;
 
     // Extract word-level timestamps for teleprompter
     const wordTimestamps = aiScores?.word_timestamps || [];
 
-    // Calculate audio duration from word timestamps or file size
-    let durationSeconds = 0;
-    if (wordTimestamps.length > 0) {
-      // Use the last word's end time as the duration
-      durationSeconds = Math.round(wordTimestamps[wordTimestamps.length - 1].end || 0);
-    } else {
-      // Fallback: estimate from file size (WAV 16kHz, 16-bit, mono = 32000 bytes/sec)
-      const fileStats = fs.statSync(req.file.path);
-      durationSeconds = Math.round(fileStats.size / 32000);
-    }
+    // Python measures decoded media duration. Word timestamps are only a
+    // secondary fallback because they may exclude leading/trailing silence.
+    const measuredDuration = Number(aiScores?.duration_seconds);
+    const timestampDuration = Number(wordTimestamps.at(-1)?.end || 0);
+    const durationSeconds = Math.round(
+      Number.isFinite(measuredDuration) && measuredDuration >= 0
+        ? measuredDuration
+        : timestampDuration
+    );
 
     // Generate AI feedback from the response data
     const pronunciationMsg = aiScores?.pronunciation?.message || '';
@@ -80,10 +117,11 @@ exports.uploadAudioAI = async (req, res) => {
     if (pronunciationMsg) feedbackParts.push(pronunciationMsg);
     const aiFeedback = feedbackParts.length > 0 ? feedbackParts.join(' ') : "Analysis complete.";
 
+    const storedAudioPath = storage.toKey(req.file.path);
     const newSession = new SpeechSession({
       userId: userId,
-      language: language || 'English',
-      audioPath: req.file.path,
+      language: sessionLanguage,
+      audioPath: storedAudioPath,
       durationSeconds,
       status: 'Completed',
       challengeId: challengeId,
@@ -94,6 +132,7 @@ exports.uploadAudioAI = async (req, res) => {
       overallScore,
       wpmScore,
       fillerWordCount,
+      fillerAnalysisAvailable,
       transcription,
       aiFeedback,
       wordTimestamps
@@ -101,10 +140,13 @@ exports.uploadAudioAI = async (req, res) => {
 
     await newSession.save();
 
-    // Return the full saved session document so Flutter gets flat keys
-    res.status(200).json(newSession.toObject());
+    // Storage keys are internal; clients receive only analysis/session data.
+    const responseSession = newSession.toObject();
+    delete responseSession.audioPath;
+    res.status(200).json(responseSession);
   } catch (error) {
     console.error('Audio Upload/AI Error:', error);
+    removeUploadedFile(req.file?.path);
     res.status(500).json({ message: "Internal server error during audio processing." });
   }
 };
@@ -112,8 +154,16 @@ exports.uploadAudioAI = async (req, res) => {
 // ANALYTICS & STATS ROUTES
 exports.getUserHistory = async (req, res) => {
   try {
-    const sessions = await SpeechSession.find({ userId: req.params.userId })
-      .sort({ createdAt: -1 });
+    const { userId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid User ID format", sessions: [] });
+    }
+
+    const sessions = await SpeechSession.find({ userId })
+      .select('-audioPath')
+      .sort({ createdAt: -1 })
+      .populate('challengeId')
+      .populate('resourceId');
 
     res.status(200).json(sessions);
   } catch (error) {
@@ -132,7 +182,10 @@ exports.getUserStats = async (req, res) => {
     }
 
     const sessions = await SpeechSession.find({ userId })
-      .sort({ createdAt: 1 });
+      .select('-audioPath')
+      .sort({ createdAt: 1 })
+      .populate('challengeId')
+      .populate('resourceId');
 
     const stats = await SpeechSession.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },
@@ -151,7 +204,7 @@ exports.getUserStats = async (req, res) => {
     res.status(200).json({ sessions, overallStats: stats[0] || null });
   } catch (error) {
     console.error("Stats calculation error:", error);
-    res.status(500).json({ message: "Error calculating stats", error: error.message, stack: error.stack });
+    res.status(500).json({ message: "Error calculating stats" });
   }
 };
 
@@ -170,6 +223,7 @@ exports.getAdminGlobalStats = async (req, res) => {
 exports.getAdminRecentSessions = async (req, res) => {
   try {
     const recentSessions = await SpeechSession.find()
+      .select('-audioPath')
       .sort({ createdAt: -1 })
       .limit(100)
       .populate('userId', 'firstName lastName email');

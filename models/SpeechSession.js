@@ -14,7 +14,11 @@ const speechSessionSchema = new mongoose.Schema({
   },
   audioPath: {
     type: String,
-    required: true
+    default: null
+  },
+  audioDeletedAt: {
+    type: Date,
+    default: null
   },
   durationSeconds: {
     type: Number,
@@ -28,11 +32,11 @@ const speechSessionSchema = new mongoose.Schema({
   // SMART ROUTING DATA
   challengeId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Challenge'
+    ref: 'LearningResource'
   },
   resourceId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Script'
+    ref: 'LearningResource'
   },
 
   // AI EVALUATION METRICS
@@ -44,6 +48,8 @@ const speechSessionSchema = new mongoose.Schema({
   // Raw counts for the Results Page
   wpmScore: { type: Number, default: 0 },
   fillerWordCount: { type: Number, default: 0 },
+  // Missing legacy values are treated conservatively as "not verified".
+  fillerAnalysisAvailable: { type: Boolean, default: false },
 
   transcription: {
     type: String,
