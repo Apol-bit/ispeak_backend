@@ -8,6 +8,7 @@ const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
 const { storage } = require('../services/storageService');
+const { mapAiError, usableAnalysis, analysisFeedback } = require('../services/analysisResponse');
 
 function removeUploadedFile(filePath) {
   if (!filePath) return;
@@ -78,10 +79,17 @@ exports.uploadAudioAI = async (req, res) => {
       });
       aiScores = fastApiResponse.data;
     } catch (aiError) {
-      console.error("FastAPI Connection Error:", aiError.message);
+      console.error("Speech analysis request failed:", aiError.code || aiError.response?.status || "unknown");
       removeUploadedFile(req.file.path);
-      return res.status(503).json({ message: "AI Evaluation Engine offline." });
+      const failure = mapAiError(aiError);
+      return res.status(failure.status).json({ message: failure.message });
     }
+
+    if (!usableAnalysis(aiScores)) {
+      removeUploadedFile(req.file.path);
+      return res.status(502).json({ message: 'Speech analysis did not return a usable result. Please record again.' });
+    }
+    const { availability, feedback } = analysisFeedback(aiScores);
 
     // Extract out-of-100 scores from the nested Python dictionary
     const paceScore = aiScores?.scores?.pacing || 0;
@@ -108,14 +116,7 @@ exports.uploadAudioAI = async (req, res) => {
         : timestampDuration
     );
 
-    // Generate AI feedback from the response data
-    const pronunciationMsg = aiScores?.pronunciation?.message || '';
-    const feedbackParts = [];
-    if (paceScore > 0) feedbackParts.push(`Pacing: ${paceScore >= 80 ? 'Great' : paceScore >= 60 ? 'Good' : 'Needs work'} (${paceScore}/100).`);
-    if (clarityScore > 0) feedbackParts.push(`Clarity: ${clarityScore >= 80 ? 'Great' : clarityScore >= 60 ? 'Good' : 'Needs work'} (${clarityScore}/100).`);
-    if (energyScore > 0) feedbackParts.push(`Energy: ${energyScore >= 80 ? 'Great' : energyScore >= 60 ? 'Good' : 'Needs work'} (${energyScore}/100).`);
-    if (pronunciationMsg) feedbackParts.push(pronunciationMsg);
-    const aiFeedback = feedbackParts.length > 0 ? feedbackParts.join(' ') : "Analysis complete.";
+    const aiFeedback = [feedback.pace, feedback.clarity, feedback.energy].join(' ');
 
     const storedAudioPath = storage.toKey(req.file.path);
     const newSession = new SpeechSession({
@@ -124,6 +125,9 @@ exports.uploadAudioAI = async (req, res) => {
       audioPath: storedAudioPath,
       durationSeconds,
       status: 'Completed',
+      analysisValid: true,
+      analysisAvailability: availability,
+      analysisFeedback: feedback,
       challengeId: challengeId,
       resourceId: resourceId,
       paceScore,

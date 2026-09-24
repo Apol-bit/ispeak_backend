@@ -39,6 +39,19 @@ const speechSessionSchema = new mongoose.Schema({
     ref: 'LearningResource'
   },
 
+  // Optional for existing sessions; no data migration is required.
+  analysisValid: { type: Boolean, default: null },
+  analysisAvailability: {
+    pitch: { type: Boolean, default: null },
+    pronunciation: { type: Boolean, default: null },
+    fillers: { type: Boolean, default: null },
+  },
+  analysisFeedback: {
+    pace: { type: String, default: '' },
+    clarity: { type: String, default: '' },
+    energy: { type: String, default: '' },
+  },
+
   // AI EVALUATION METRICS
   paceScore: { type: Number, default: 0 },
   clarityScore: { type: Number, default: 0 },
