@@ -20,6 +20,7 @@ function removeUploadedFile(filePath) {
 }
 
 exports.uploadAudioAI = async (req, res) => {
+  req.analysisStarted = true;
   try {
     const { language, challengeId, resourceId } = req.body;
     const userId = req.auth.userId;
@@ -36,11 +37,6 @@ exports.uploadAudioAI = async (req, res) => {
     if (!['English', 'Filipino', 'Taglish'].includes(sessionLanguage)) {
       removeUploadedFile(req.file.path);
       return res.status(400).json({ message: "Invalid language" });
-    }
-    const userExists = await User.exists({ _id: userId });
-    if (!userExists) {
-      removeUploadedFile(req.file.path);
-      return res.status(404).json({ message: "User not found" });
     }
 
     const formData = new FormData();
@@ -74,14 +70,18 @@ exports.uploadAudioAI = async (req, res) => {
       const timeout = Number(process.env.PYTHON_TIMEOUT_MS || 300000);
       const fastApiResponse = await axios.post(`${pythonUrl}/transcribe`, formData, {
         headers: { ...formData.getHeaders() },
-        timeout: Number.isFinite(timeout) ? timeout : 300000,
-        maxBodyLength: 26 * 1024 * 1024
+        timeout: Number.isFinite(timeout) && timeout > 0 ? timeout : 300000,
+        maxBodyLength: 51 * 1024 * 1024
       });
+      for (const header of ['x-analysis-queue-wait-ms', 'x-analysis-processing-ms']) {
+        if (fastApiResponse.headers[header]) res.set(header, fastApiResponse.headers[header]);
+      }
       aiScores = fastApiResponse.data;
     } catch (aiError) {
       console.error("Speech analysis request failed:", aiError.code || aiError.response?.status || "unknown");
       removeUploadedFile(req.file.path);
       const failure = mapAiError(aiError);
+      if ([429, 503].includes(failure.status)) res.set('Retry-After', '5');
       return res.status(failure.status).json({ message: failure.message });
     }
 
@@ -152,6 +152,8 @@ exports.uploadAudioAI = async (req, res) => {
     console.error('Audio Upload/AI Error:', error);
     removeUploadedFile(req.file?.path);
     res.status(500).json({ message: "Internal server error during audio processing." });
+  } finally {
+    req.releaseAnalysis?.();
   }
 };
 
@@ -163,11 +165,36 @@ exports.getUserHistory = async (req, res) => {
       return res.status(400).json({ message: "Invalid User ID format", sessions: [] });
     }
 
-    const sessions = await SpeechSession.find({ userId })
+    const requestedLimit = Number(req.query.limit ?? 20);
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100) {
+      return res.status(400).json({ message: 'limit must be an integer from 1 to 100' });
+    }
+    const filter = { userId };
+    if (req.query.before) {
+      try {
+        const cursor = JSON.parse(Buffer.from(req.query.before, 'base64url').toString());
+        const date = new Date(cursor.date);
+        if (!Number.isFinite(date.getTime()) || !mongoose.Types.ObjectId.isValid(cursor.id)) throw new Error('Invalid cursor');
+        filter.$or = [{ createdAt: { $lt: date } }, { createdAt: date, _id: { $lt: new mongoose.Types.ObjectId(cursor.id) } }];
+      } catch {
+        return res.status(400).json({ message: 'Invalid history cursor' });
+      }
+    }
+    const sessions = await SpeechSession.find(filter)
       .select('-audioPath')
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(requestedLimit + 1)
       .populate('challengeId')
-      .populate('resourceId');
+      .populate('resourceId')
+      .lean();
+
+    const hasMore = sessions.length > requestedLimit;
+    if (hasMore) sessions.pop();
+    const last = sessions.at(-1);
+    const nextCursor = hasMore ? Buffer.from(JSON.stringify({ date: last.createdAt, id: last._id })).toString('base64url') : '';
+    res.set('X-Next-Cursor', nextCursor);
+    res.set('X-Total-Count', String(await SpeechSession.countDocuments({ userId })));
+    res.set('Access-Control-Expose-Headers', 'X-Next-Cursor, X-Total-Count');
 
     res.status(200).json(sessions);
   } catch (error) {
@@ -185,11 +212,22 @@ exports.getUserStats = async (req, res) => {
       return res.status(400).json({ message: "Invalid User ID format", sessions: [], overallStats: null });
     }
 
-    const sessions = await SpeechSession.find({ userId })
-      .select('-audioPath')
-      .sort({ createdAt: 1 })
-      .populate('challengeId')
-      .populate('resourceId');
+    // Compact rows retain EVERY date/score used by lifetime averages, local
+    // calendar streaks and weekly charts. Legacy callers retain full rows.
+    const view = req.query.view;
+    if (view && !['compact', 'summary'].includes(view)) {
+      return res.status(400).json({ message: 'Unsupported statistics view' });
+    }
+    let sessions = [];
+    if (view !== 'summary') {
+      let query = SpeechSession.find({ userId }).sort({ createdAt: 1 });
+      if (view === 'compact') {
+        query = query.select('createdAt language overallScore paceScore clarityScore energyScore');
+      } else {
+        query = query.select('-audioPath').populate('challengeId').populate('resourceId');
+      }
+      sessions = await query.lean();
+    }
 
     const stats = await SpeechSession.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId) } },

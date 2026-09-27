@@ -82,4 +82,6 @@ const speechSessionSchema = new mongoose.Schema({
   timestamps: true
 });
 
+speechSessionSchema.index({ userId: 1, createdAt: -1 });
+
 module.exports = mongoose.model('SpeechSession', speechSessionSchema);

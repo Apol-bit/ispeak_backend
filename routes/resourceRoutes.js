@@ -46,6 +46,7 @@ const uploadReferenceAudio = (req, res, next) => {
 // Define the routes
 router.get('/resources', resourceController.getAllResources);
 router.post('/admin/resources', authorizeRoles('admin', 'validator'), uploadReferenceAudio, resourceController.createResource);
+router.patch('/admin/resources/reorder', authorizeRoles('admin', 'validator'), resourceController.reorderResources);
 router.put('/admin/resources/:id', authorizeRoles('admin', 'validator'), uploadReferenceAudio, resourceController.updateResource);
 router.delete('/admin/resources/:id', authorizeRoles('admin', 'validator'), resourceController.deleteResource);
 

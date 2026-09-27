@@ -3,6 +3,8 @@ const router = express.Router();
 const sessionController = require('../controllers/sessionController');
 const multer = require('multer');
 const path = require('path');
+const { randomUUID } = require('node:crypto');
+const { createAnalysisAdmission } = require('../middleware/analysisAdmission');
 const { authenticate, authorizeRoles, requireSelfOrRoles } = require('../middleware/auth');
 const { storage } = require('../services/storageService');
 
@@ -11,7 +13,7 @@ router.use(authenticate);
 // MULTER CONFIG
 const multerStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, storage.getUploadDirectory('recordings')),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
+  filename: (req, file, cb) => cb(null, randomUUID() + path.extname(file.originalname).toLowerCase())
 });
 const upload = multer({
   storage: multerStorage,
@@ -31,7 +33,9 @@ const upload = multer({
 const uploadAudio = (req, res, next) => {
   upload.single('audio')(req, res, (error) => {
     if (error) {
-      return res.status(400).json({ message: error.message });
+      req.releaseAnalysis?.();
+      const invalid = error instanceof multer.MulterError || error.message === 'Unsupported audio file type';
+      return res.status(invalid ? 400 : 500).json({ message: invalid ? error.message : 'Unable to store the recording. Please try again.' });
     }
     next();
   });
@@ -40,6 +44,7 @@ const uploadAudio = (req, res, next) => {
 // Routes
 router.post(
   '/upload-audio',
+  createAnalysisAdmission(),
   uploadAudio,
   sessionController.uploadAudioAI
 );

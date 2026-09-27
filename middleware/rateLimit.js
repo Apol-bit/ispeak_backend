@@ -1,4 +1,4 @@
-function createRateLimiter({ windowMs, max, message }) {
+function createRateLimiter({ windowMs, max, message, keyForRequest }) {
   const clients = new Map();
 
   const cleanup = setInterval(() => {
@@ -10,7 +10,7 @@ function createRateLimiter({ windowMs, max, message }) {
   cleanup.unref();
 
   return (req, res, next) => {
-    const key = req.ip || req.socket.remoteAddress || 'unknown';
+    const key = keyForRequest ? keyForRequest(req) : req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     let state = clients.get(key);
     if (!state || state.resetAt <= now) {
@@ -24,6 +24,7 @@ function createRateLimiter({ windowMs, max, message }) {
     res.set('RateLimit-Reset', String(Math.ceil(state.resetAt / 1000)));
 
     if (state.count > max) {
+      res.set('Retry-After', String(Math.max(1, Math.ceil((state.resetAt - now) / 1000))));
       return res.status(429).json({ message });
     }
     return next();

@@ -1,5 +1,27 @@
 const LearningResource = require('../models/LearningResource');
+const mongoose = require('mongoose');
 const { storage } = require('../services/storageService');
+
+function groupFilter(resource) {
+  if (resource.type === 'GuidedTask') return { type: 'GuidedTask' };
+  return { type: resource.type, difficulty: resource.difficulty || 'None' };
+}
+
+function sameGroup(first, second) {
+  if (first.type !== second.type) return false;
+  return first.type === 'GuidedTask' ||
+    (first.difficulty || 'None') === (second.difficulty || 'None');
+}
+
+async function nextDisplayOrder(resource, excludeId) {
+  const rows = await LearningResource.find(groupFilter(resource)).sort({
+    displayOrder: 1, createdAt: -1, _id: 1
+  });
+  const eligible = rows.filter(row => String(row._id) !== String(excludeId || ''));
+  const maximum = eligible.reduce((value, row) =>
+    Math.max(value, Number.isInteger(row.displayOrder) ? row.displayOrder : 0), 0);
+  return Math.max(maximum, eligible.length) + 1;
+}
 
 async function deleteStoredFile(key, context) {
   if (!key) return;
@@ -14,7 +36,13 @@ async function deleteStoredFile(key, context) {
 exports.getAllResources = async (req, res) => {
   try {
     const filter = req.query.type ? { type: req.query.type } : {};
-    const resources = await LearningResource.find(filter).sort({ createdAt: -1 });
+    const resources = await LearningResource.find(filter).sort({
+      type: 1,
+      difficulty: 1,
+      displayOrder: 1,
+      createdAt: -1,
+      _id: 1
+    });
     if (req.auth.role === 'user') {
       return res.status(200).json(resources.map((resource) => {
         const safeResource = resource.toObject();
@@ -34,6 +62,7 @@ exports.createResource = async (req, res) => {
   try {
     const resourceData = { ...req.body };
     delete resourceData.referenceAudioPath;
+    delete resourceData.displayOrder;
     resourceData.createdBy = req.auth.userId;
 
     // Parse JSON fields that may arrive as strings from multipart form
@@ -58,6 +87,7 @@ exports.createResource = async (req, res) => {
       resourceData.referenceAudioPath = storage.toKey(req.file.path);
     }
 
+    resourceData.displayOrder = await nextDisplayOrder(resourceData);
     const newResource = new LearningResource(resourceData);
     await newResource.save();
     res.status(201).json({ message: "Resource created successfully!", resource: newResource });
@@ -75,6 +105,7 @@ exports.updateResource = async (req, res) => {
   let newAudioKey = null;
   try {
     const updateData = { ...req.body };
+    delete updateData.displayOrder;
     delete updateData.referenceAudioPath;
     delete updateData.createdBy;
 
@@ -92,16 +123,24 @@ exports.updateResource = async (req, res) => {
       updateData.timeLimitSeconds = parseInt(updateData.timeLimitSeconds, 10) || 0;
     }
 
+    const existingResource = await LearningResource.findById(req.params.id);
+    if (!existingResource) {
+      if (req.file) await deleteStoredFile(storage.toKey(req.file.path), 'orphaned resource upload');
+      return res.status(404).json({ message: "Resource not found" });
+    }
+    const targetResource = {
+      type: updateData.type || existingResource.type,
+      difficulty: updateData.difficulty || existingResource.difficulty
+    };
+    if (!sameGroup(existingResource, targetResource)) {
+      updateData.displayOrder = await nextDisplayOrder(targetResource, existingResource._id);
+    }
+
     // Handle reference audio file upload (from Validator)
     // TODO [CLOUD]: Same as createResource — replace with cloud upload logic.
     let oldAudioKey = null;
     if (req.file) {
-      const oldResource = await LearningResource.findById(req.params.id);
-      if (!oldResource) {
-        await deleteStoredFile(storage.toKey(req.file.path), 'orphaned resource upload');
-        return res.status(404).json({ message: "Resource not found" });
-      }
-      oldAudioKey = oldResource.referenceAudioPath;
+      oldAudioKey = existingResource.referenceAudioPath;
       newAudioKey = storage.toKey(req.file.path);
       updateData.referenceAudioPath = newAudioKey;
     }
@@ -123,6 +162,52 @@ exports.updateResource = async (req, res) => {
     await deleteStoredFile(newAudioKey, 'failed replacement upload');
     console.error("Error updating resource:", error);
     res.status(500).json({ message: "Error updating resource" });
+  }
+};
+
+// SAVE THE COMPLETE ORDER OF ONE TYPE + LEVEL GROUP
+exports.reorderResources = async (req, res) => {
+  try {
+    const { type, difficulty, orderedIds } = req.body || {};
+    if (!['Script', 'Challenge', 'GuidedTask'].includes(type)) {
+      return res.status(400).json({ message: 'Invalid resource type' });
+    }
+    if (type !== 'GuidedTask' &&
+        !['Beginner', 'Intermediate', 'Advanced', 'None'].includes(difficulty)) {
+      return res.status(400).json({ message: 'Invalid resource difficulty' });
+    }
+    if (!Array.isArray(orderedIds) || orderedIds.length === 0 ||
+        new Set(orderedIds).size !== orderedIds.length ||
+        orderedIds.some(id => !mongoose.Types.ObjectId.isValid(id))) {
+      return res.status(400).json({ message: 'orderedIds must contain unique resource IDs' });
+    }
+
+    const resources = await LearningResource.find(groupFilter({ type, difficulty })).sort({
+      displayOrder: 1, createdAt: -1, _id: 1
+    });
+    const groupIds = new Set(resources.map(resource => String(resource._id)));
+    if (orderedIds.length !== groupIds.size || orderedIds.some(id => !groupIds.has(String(id)))) {
+      return res.status(400).json({
+        message: 'Order must contain every resource from exactly one type and level group'
+      });
+    }
+
+    await LearningResource.bulkWrite(orderedIds.map((id, index) => ({
+      updateOne: {
+        filter: { _id: id },
+        update: { $set: { displayOrder: index + 1 } }
+      }
+    })));
+    const byId = new Map(resources.map(resource => [String(resource._id), resource]));
+    const ordered = orderedIds.map((id, index) => {
+      const resource = byId.get(String(id));
+      resource.displayOrder = index + 1;
+      return resource;
+    });
+    return res.status(200).json({ resources: ordered });
+  } catch (error) {
+    console.error('Error reordering resources:', error);
+    return res.status(500).json({ message: 'Error reordering resources' });
   }
 };
 

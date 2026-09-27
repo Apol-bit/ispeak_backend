@@ -122,3 +122,30 @@ test('banned user is rejected even with a valid token', async () => {
   const response = await api('/api/user/banned1', tokenFor('banned1'));
   assert.equal(response.status, 403);
 });
+
+test('database failure is 503 and a subsequent valid request remains authenticated', async () => {
+  const stub = User.findById;
+  try {
+    User.findById = () => ({ select: async () => { throw new Error('database offline'); } });
+    assert.equal((await api('/api/auth/me', tokenFor('user1'))).status, 503);
+  } finally {
+    User.findById = stub;
+  }
+  assert.equal((await api('/api/auth/me', tokenFor('user1'))).status, 200);
+});
+
+test('mounted routers share one account check but new requests recheck the account', async () => {
+  const stub = User.findById;
+  let calls = 0;
+  try {
+    User.findById = (id) => { calls++; return stub(id); };
+    assert.equal((await api('/api/sessions/user1', tokenFor('user1'))).status, 400);
+    assert.equal(calls, 1);
+    users.user1.status = 'Banned';
+    assert.equal((await api('/api/sessions/user1', tokenFor('user1'))).status, 403);
+    assert.equal(calls, 2);
+  } finally {
+    User.findById = stub;
+    users.user1.status = 'Active';
+  }
+});

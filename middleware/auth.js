@@ -11,17 +11,34 @@ function readBearerToken(req) {
 }
 
 async function authenticate(req, res, next) {
+  // Routers mounted at /api can traverse this middleware more than once.
+  // Reuse only this request's verified account, never a cross-request cache.
+  if (req.auth) return next();
   const token = readBearerToken(req);
   if (!token) {
     return res.status(401).json({ message: 'Authentication required' });
   }
 
+  let payload;
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET, {
+    payload = jwt.verify(token, process.env.JWT_SECRET, {
       algorithms: ['HS256'],
       issuer: process.env.JWT_ISSUER || 'ispeak-api',
       audience: process.env.JWT_AUDIENCE || 'ispeak-clients',
     });
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Authentication session expired' });
+    }
+    if (['JsonWebTokenError', 'NotBeforeError'].includes(error.name) && process.env.JWT_SECRET) {
+      return res.status(401).json({ message: 'Invalid authentication token' });
+    }
+    return res.status(500).json({ message: 'Authentication service is unavailable' });
+  }
+  if (typeof payload.userId !== 'string' || !payload.userId) {
+    return res.status(401).json({ message: 'Invalid authentication token' });
+  }
+  try {
     const user = await User.findById(payload.userId).select(
       '_id firstName lastName username email role status isArchived'
     );
@@ -40,10 +57,11 @@ async function authenticate(req, res, next) {
     };
     return next();
   } catch (error) {
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ message: 'Authentication session expired' });
+    if (error.name === 'CastError') {
+      return res.status(401).json({ message: 'Invalid authentication token' });
     }
-    return res.status(401).json({ message: 'Invalid authentication token' });
+    console.error('Authentication account lookup failed:', error.name);
+    return res.status(503).json({ message: 'Account verification is temporarily unavailable. Please try again.' });
   }
 }
 

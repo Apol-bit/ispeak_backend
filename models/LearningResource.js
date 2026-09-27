@@ -39,6 +39,10 @@ const learningResourceSchema = new mongoose.Schema({
     type: String,
     default: "" // Used for Guided Tasks (e.g., "volume_up", "chat_bubble", "timer")
   },
+  displayOrder: {
+    type: Number,
+    min: 1
+  },
 
   // TYPE-SPECIFIC FIELDS (Optional depending on Type)
 
