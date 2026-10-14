@@ -54,8 +54,7 @@ const learningResourceSchema = new mongoose.Schema({
   },
 
   // Reference Audio (uploaded by Validator)
-  // TODO [CLOUD]: When migrating to cloud storage (S3/GCS), replace local path
-  //   with the full cloud URL. Update resourceController.js upload logic accordingly.
+  // Internal provider key (local relative path or private R2 object key), never a public URL.
   referenceAudioPath: {
     type: String,
     default: ""

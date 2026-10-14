@@ -5,22 +5,30 @@ const mongoose = require('mongoose');
 
 // Required for the AI FastAPI Connection
 const fs = require('fs');
+const path = require('node:path');
 const axios = require('axios');
 const FormData = require('form-data');
 const { storage } = require('../services/storageService');
+const { audioStorage } = require('../services/audioStorageService');
+const { storageFailure, StorageError } = require('../services/storageErrors');
+const { AUDIO_TYPES } = require('../services/audioFile');
 const { mapAiError, usableAnalysis, analysisFeedback } = require('../services/analysisResponse');
+const { logError } = require('../services/safeLogger');
 
 function removeUploadedFile(filePath) {
   if (!filePath) return;
   try {
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   } catch (error) {
-    console.error('Failed to clean up uploaded audio:', error.message);
+    logError('temporary_audio_cleanup_failed', error);
   }
 }
 
 exports.uploadAudioAI = async (req, res) => {
   req.analysisStarted = true;
+  let recordingStream;
+  let referenceStream;
+  let saved = false;
   try {
     const { language, challengeId, resourceId } = req.body;
     const userId = req.auth.userId;
@@ -40,7 +48,8 @@ exports.uploadAudioAI = async (req, res) => {
     }
 
     const formData = new FormData();
-    formData.append('file', fs.createReadStream(req.file.path));
+    recordingStream = fs.createReadStream(req.file.path);
+    formData.append('file', recordingStream);
     formData.append('language', sessionLanguage);
 
     // Look up either practice resource type to get reference audio (if it exists).
@@ -56,9 +65,15 @@ exports.uploadAudioAI = async (req, res) => {
     // If reference audio exists, attach it for comparison scoring
     if (referenceAudioPath) {
       try {
-        formData.append('reference_audio', storage.openReadStream(referenceAudioPath));
-      } catch (error) {
-        console.error('Reference audio is unavailable:', error.message);
+        referenceStream = await storage.openReadStream(referenceAudioPath);
+        formData.append('reference_audio', referenceStream, {
+          filename: path.posix.basename(referenceAudioPath),
+          contentType: AUDIO_TYPES[path.posix.extname(referenceAudioPath)],
+          ...(referenceStream.audioLength != null ? { knownLength: referenceStream.audioLength } : {}),
+        });
+      } catch {
+        // Do not silently change reference comparison to unreferenced scoring.
+        throw new StorageError('reference_read');
       }
     }
 
@@ -69,7 +84,9 @@ exports.uploadAudioAI = async (req, res) => {
         .replace(/\/+$/, '');
       const timeout = Number(process.env.PYTHON_TIMEOUT_MS || 300000);
       const fastApiResponse = await axios.post(`${pythonUrl}/transcribe`, formData, {
-        headers: { ...formData.getHeaders() },
+        headers: { ...formData.getHeaders(), ...(process.env.PYTHON_SERVICE_TOKEN
+          ? { 'X-iSpeak-Service-Token': process.env.PYTHON_SERVICE_TOKEN } : {}) },
+        maxRedirects: 0, // Do not forward the service credential to another host.
         timeout: Number.isFinite(timeout) && timeout > 0 ? timeout : 300000,
         maxBodyLength: 51 * 1024 * 1024
       });
@@ -78,7 +95,7 @@ exports.uploadAudioAI = async (req, res) => {
       }
       aiScores = fastApiResponse.data;
     } catch (aiError) {
-      console.error("Speech analysis request failed:", aiError.code || aiError.response?.status || "unknown");
+      logError('speech_analysis_request_failed', aiError);
       removeUploadedFile(req.file.path);
       const failure = mapAiError(aiError);
       if ([429, 503].includes(failure.status)) res.set('Retry-After', '5');
@@ -118,7 +135,7 @@ exports.uploadAudioAI = async (req, res) => {
 
     const aiFeedback = [feedback.pace, feedback.clarity, feedback.energy].join(' ');
 
-    const storedAudioPath = storage.toKey(req.file.path);
+    const storedAudioPath = await audioStorage.storeUpload(req.file, { category: 'recordings', ownerId: userId });
     const newSession = new SpeechSession({
       userId: userId,
       language: sessionLanguage,
@@ -143,16 +160,25 @@ exports.uploadAudioAI = async (req, res) => {
     });
 
     await newSession.save();
+    saved = true;
+    await audioStorage.committed(storedAudioPath);
 
     // Storage keys are internal; clients receive only analysis/session data.
     const responseSession = newSession.toObject();
     delete responseSession.audioPath;
+    recordingStream?.destroy();
+    referenceStream?.destroy();
+    await audioStorage.cleanupTemp(req.file, { preserveLocal: true });
     res.status(200).json(responseSession);
   } catch (error) {
-    console.error('Audio Upload/AI Error:', error);
+    console.error('Audio upload failed:', error instanceof StorageError ? error.code : 'SESSION_SAVE_OR_PROCESSING');
     removeUploadedFile(req.file?.path);
+    if (storageFailure(res, error)) return;
     res.status(500).json({ message: "Internal server error during audio processing." });
   } finally {
+    recordingStream?.destroy();
+    referenceStream?.destroy();
+    await audioStorage.cleanupTemp(req.file, { preserveLocal: saved });
     req.releaseAnalysis?.();
   }
 };
@@ -198,7 +224,7 @@ exports.getUserHistory = async (req, res) => {
 
     res.status(200).json(sessions);
   } catch (error) {
-    console.error("Error fetching history:", error);
+    logError('history_query_failed', error);
     res.status(500).json({ message: "Error fetching history" });
   }
 };
@@ -245,7 +271,7 @@ exports.getUserStats = async (req, res) => {
 
     res.status(200).json({ sessions, overallStats: stats[0] || null });
   } catch (error) {
-    console.error("Stats calculation error:", error);
+    logError('stats_query_failed', error);
     res.status(500).json({ message: "Error calculating stats" });
   }
 };

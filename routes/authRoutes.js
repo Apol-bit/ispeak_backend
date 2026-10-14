@@ -6,7 +6,8 @@ const { createRateLimiter } = require('../middleware/rateLimit');
 
 const authLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 20),
+  max: Number.isSafeInteger(Number(process.env.AUTH_RATE_LIMIT_MAX)) && Number(process.env.AUTH_RATE_LIMIT_MAX) > 0
+    ? Number(process.env.AUTH_RATE_LIMIT_MAX) : 20,
   message: 'Too many authentication attempts. Please try again later.',
 });
 

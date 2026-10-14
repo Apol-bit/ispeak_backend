@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
+const { randomUUID } = require('node:crypto');
 const resourceController = require('../controllers/resourceController');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
 const { storage } = require('../services/storageService');
@@ -9,16 +10,13 @@ const { storage } = require('../services/storageService');
 router.use(authenticate);
 
 // Multer config for reference audio uploads
-// TODO [CLOUD]: Replace diskStorage with memoryStorage + cloud upload middleware
-//   when migrating to S3/GCS. The file buffer will be uploaded to the cloud
-//   and the returned URL stored in the DB instead of a local path.
+// R2 returns an OS scratch directory; local mode keeps its established directory.
 const multerStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, storage.getUploadDirectory('reference_audio'));
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, `ref_${uniqueSuffix}${path.extname(file.originalname)}`);
+    cb(null, `ref_${randomUUID()}${path.extname(file.originalname).toLowerCase()}`);
   }
 });
 
@@ -38,13 +36,17 @@ const upload = multer({
 
 const uploadReferenceAudio = (req, res, next) => {
   upload.single('referenceAudio')(req, res, (error) => {
-    if (error) return res.status(400).json({ message: error.message });
+    if (error) {
+      const invalid = error instanceof multer.MulterError || error.message === 'Unsupported audio file type';
+      return res.status(invalid ? 400 : 503).json({ message: invalid ? error.message : 'Unable to store reference audio. Please try again.' });
+    }
     return next();
   });
 };
 
 // Define the routes
 router.get('/resources', resourceController.getAllResources);
+router.get('/admin/resources/:id/reference-audio', authorizeRoles('admin', 'validator'), resourceController.getReferenceAudio);
 router.post('/admin/resources', authorizeRoles('admin', 'validator'), uploadReferenceAudio, resourceController.createResource);
 router.patch('/admin/resources/reorder', authorizeRoles('admin', 'validator'), resourceController.reorderResources);
 router.put('/admin/resources/:id', authorizeRoles('admin', 'validator'), uploadReferenceAudio, resourceController.updateResource);

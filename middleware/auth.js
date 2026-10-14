@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { logError } = require('../services/safeLogger');
 
 function readBearerToken(req) {
   const header = req.get('authorization');
@@ -60,7 +61,7 @@ async function authenticate(req, res, next) {
     if (error.name === 'CastError') {
       return res.status(401).json({ message: 'Invalid authentication token' });
     }
-    console.error('Authentication account lookup failed:', error.name);
+    logError('authentication_account_lookup_failed', error);
     return res.status(503).json({ message: 'Account verification is temporarily unavailable. Please try again.' });
   }
 }

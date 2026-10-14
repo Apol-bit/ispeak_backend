@@ -1,6 +1,9 @@
 const User = require('../models/User');
 const SpeechSession = require('../models/SpeechSession');
 const { storage } = require('../services/storageService');
+const { audioStorage } = require('../services/audioStorageService');
+const { storageFailure } = require('../services/storageErrors');
+const { logError } = require('../services/safeLogger');
 
 function exactCaseInsensitive(value) {
   const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -38,7 +41,7 @@ exports.archiveUser = async (req, res) => {
 
     res.status(200).json({ message: "User successfully archived", user: updatedUser });
   } catch (error) {
-    console.error("Archive Error:", error);
+    logError('archive_failed', error);
     res.status(500).json({ message: "Server error while archiving user" });
   }
 };
@@ -65,7 +68,7 @@ exports.unarchiveUser = async (req, res) => {
 
     res.status(200).json({ message: "User successfully restored", user: updatedUser });
   } catch (error) {
-    console.error("Unarchive Error:", error);
+    logError('unarchive_failed', error);
     res.status(500).json({ message: "Server error while restoring user" });
   }
 };
@@ -106,13 +109,24 @@ exports.deleteUser = async (req, res) => {
 
     const sessions = await SpeechSession.find({ userId: user._id }).select('audioPath');
     for (const session of sessions) {
-      if (session.audioPath) await storage.delete(session.audioPath);
+      if (storage.driver === 'r2') await audioStorage.prepareRemoval(session.audioPath);
+      else if (session.audioPath) await storage.delete(session.audioPath);
     }
-    await SpeechSession.deleteMany({ userId: user._id });
+    // Do not sweep an in-flight upload's new session without journaling its key.
+    await SpeechSession.deleteMany(storage.driver === 'r2'
+      ? { userId: user._id, _id: { $in: sessions.map(session => session._id) } }
+      : { userId: user._id });
+    if (storage.driver === 'r2' && await SpeechSession.exists({ userId: user._id })) {
+      return res.status(409).json({ message: 'New recordings arrived during deletion. Please retry after uploads finish.' });
+    }
     await User.findByIdAndDelete(user._id);
+    if (storage.driver === 'r2') {
+      for (const session of sessions) await audioStorage.removeIfUnreferenced(session.audioPath);
+    }
     res.json({ message: "User deleted successfully" });
   } catch (err) {
-    console.error('Delete user error:', err);
+    console.error('User deletion failed; cloud cleanup intents retained for retry.');
+    if (storageFailure(res, err)) return;
     res.status(500).json({ message: 'Error deleting user' });
   }
 };
@@ -166,7 +180,7 @@ exports.updateUserProfile = async (req, res) => {
     const updatedUser = await User.findByIdAndUpdate(req.params.userId, updateData, { new: true, runValidators: true }).select('-password');
     res.status(200).json({ message: "Profile updated successfully!", user: updatedUser });
   } catch (error) {
-    console.error('Update Profile Error:', error);
+    logError('profile_update_failed', error);
     res.status(500).json({ message: "Error updating profile" });
   }
 };
@@ -188,7 +202,7 @@ exports.saveDemographics = async (req, res) => {
 
     res.status(200).json({ message: "Demographics saved successfully!", user: updatedUser });
   } catch (error) {
-    console.error("Save Demographics Error:", error);
+    logError('demographics_save_failed', error);
     res.status(500).json({ message: "Error saving demographics" });
   }
 };

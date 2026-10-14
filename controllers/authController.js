@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { logError } = require('../services/safeLogger');
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TERMS_VERSION = process.env.TERMS_VERSION || '1.0';
@@ -84,7 +85,7 @@ exports.signup = async (req, res) => {
       user: publicUser(newUser),
     });
   } catch (error) {
-    console.error('Sign Up Error:', error);
+    logError('signup_failed', error);
     if (error?.code === 11000) {
       return res.status(409).json({ message: 'Email or username is already in use' });
     }

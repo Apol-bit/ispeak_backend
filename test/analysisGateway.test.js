@@ -20,10 +20,11 @@ User.findById = () => ({select: async () => ({_id:id,role:'user',status:'Active'
 User.exists = async () => ({_id:id});
 SpeechSession.prototype.save = async function() {if(databaseFailure) throw new Error('database offline'); saves++; return this;};
 const token = jwt.sign({userId:id}, process.env.JWT_SECRET, {algorithm:'HS256',issuer:'ispeak-api',audience:'ispeak-clients',expiresIn:'1h'});
-let ai, gateway, url, mode;
+let ai, gateway, url, mode, serviceHeader;
 async function listen(server) { await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve)); return `http://127.0.0.1:${server.address().port}`; }
 test.before(async()=>{
  ai=http.createServer((request,response)=>{
+  serviceHeader = request.headers['x-ispeak-service-token'];
   request.resume();request.on('end',()=>{
    if(mode==='connection'){request.socket.destroy();return;}
    if(mode==='timeout'){return;}
@@ -64,4 +65,15 @@ test('session database save failure returns 500, cleans audio, and retains authe
   assert.deepEqual(fs.readdirSync(root).filter(name=>name!=='reference_audio'),[]);
   assert.equal((await fetch(url+'/api/auth/me',{headers:{Authorization:'Bearer '+token}})).status,200);
  } finally {databaseFailure=false;}
+});
+
+test('Node forwards only configured private service token to Python', async()=>{
+ process.env.PYTHON_SERVICE_TOKEN='gateway-test-only-service-token-not-a-real-secret'; mode='200';
+ try {
+  const form=new FormData();form.append('audio',new Blob(['speech']),'test.wav');
+  const response=await fetch(url+'/api/upload-audio',{method:'POST',headers:{Authorization:'Bearer '+token},body:form});
+  assert.equal(response.status,200);
+  assert.equal(serviceHeader,process.env.PYTHON_SERVICE_TOKEN);
+  assert.doesNotMatch(await response.text(), /gateway-test-only-service-token/);
+ } finally {delete process.env.PYTHON_SERVICE_TOKEN;}
 });

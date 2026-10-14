@@ -1,6 +1,12 @@
 const LearningResource = require('../models/LearningResource');
 const mongoose = require('mongoose');
 const { storage } = require('../services/storageService');
+const { audioStorage } = require('../services/audioStorageService');
+const { storageFailure } = require('../services/storageErrors');
+const { inspectAudio, AUDIO_TYPES } = require('../services/audioFile');
+const { logError } = require('../services/safeLogger');
+const path = require('node:path');
+const { pipeline } = require('node:stream/promises');
 
 function groupFilter(resource) {
   if (resource.type === 'GuidedTask') return { type: 'GuidedTask' };
@@ -24,12 +30,7 @@ async function nextDisplayOrder(resource, excludeId) {
 }
 
 async function deleteStoredFile(key, context) {
-  if (!key) return;
-  try {
-    await storage.delete(key);
-  } catch (error) {
-    console.error(`Unable to delete ${context}:`, error);
-  }
+  await audioStorage.removeIfUnreferenced(key);
 }
 
 // GET ALL RESOURCES
@@ -52,13 +53,14 @@ exports.getAllResources = async (req, res) => {
     }
     res.status(200).json(resources);
   } catch (error) {
-    console.error("Error fetching resources:", error);
+    logError('resource_query_failed', error);
     res.status(500).json({ message: "Error fetching resources" });
   }
 };
 
 // CREATE A RESOURCE (supports multipart/form-data with reference audio upload)
 exports.createResource = async (req, res) => {
+  let saved = false;
   try {
     const resourceData = { ...req.body };
     delete resourceData.referenceAudioPath;
@@ -79,30 +81,33 @@ exports.createResource = async (req, res) => {
       resourceData.timeLimitSeconds = parseInt(resourceData.timeLimitSeconds, 10) || 0;
     }
 
-    // Handle reference audio file upload (from Validator)
-    // TODO [CLOUD]: Replace local file storage with cloud upload (S3/GCS).
-    //   Use a service like aws-sdk or @google-cloud/storage to upload req.file.buffer
-    //   and store the returned URL in referenceAudioPath instead of the local path.
-    if (req.file) {
-      resourceData.referenceAudioPath = storage.toKey(req.file.path);
-    }
-
     resourceData.displayOrder = await nextDisplayOrder(resourceData);
     const newResource = new LearningResource(resourceData);
+    if (req.file) {
+      await inspectAudio(req.file.path);
+      newResource.referenceAudioPath = await audioStorage.storeUpload(req.file, {
+        category: 'reference_audio', ownerId: newResource._id,
+      });
+    }
     await newResource.save();
+    saved = true;
+    await audioStorage.committed(newResource.referenceAudioPath);
+    await audioStorage.cleanupTemp(req.file, { preserveLocal: true });
     res.status(201).json({ message: "Resource created successfully!", resource: newResource });
   } catch (error) {
-    if (req.file) {
-      await deleteStoredFile(storage.toKey(req.file.path), 'failed resource upload');
-    }
-    console.error("Error creating resource:", error);
+    console.error('Resource create failed; pending cloud uploads remain journaled.');
+    await audioStorage.cleanupTemp(req.file);
+    if (storageFailure(res, error)) return;
     res.status(500).json({ message: "Error creating learning resource" });
+  } finally {
+    await audioStorage.cleanupTemp(req.file, { preserveLocal: saved });
   }
 };
 
 // UPDATE A RESOURCE (supports multipart/form-data with reference audio upload)
 exports.updateResource = async (req, res) => {
   let newAudioKey = null;
+  let saved = false;
   try {
     const updateData = { ...req.body };
     delete updateData.displayOrder;
@@ -125,7 +130,7 @@ exports.updateResource = async (req, res) => {
 
     const existingResource = await LearningResource.findById(req.params.id);
     if (!existingResource) {
-      if (req.file) await deleteStoredFile(storage.toKey(req.file.path), 'orphaned resource upload');
+      await audioStorage.cleanupTemp(req.file);
       return res.status(404).json({ message: "Resource not found" });
     }
     const targetResource = {
@@ -136,32 +141,43 @@ exports.updateResource = async (req, res) => {
       updateData.displayOrder = await nextDisplayOrder(targetResource, existingResource._id);
     }
 
-    // Handle reference audio file upload (from Validator)
-    // TODO [CLOUD]: Same as createResource — replace with cloud upload logic.
+    // Store the new object before changing the reference, then retire the old.
     let oldAudioKey = null;
     if (req.file) {
       oldAudioKey = existingResource.referenceAudioPath;
-      newAudioKey = storage.toKey(req.file.path);
+      await inspectAudio(req.file.path);
+      await audioStorage.prepareRemoval(oldAudioKey);
+      newAudioKey = await audioStorage.storeUpload(req.file, {
+        category: 'reference_audio', ownerId: existingResource._id,
+      });
       updateData.referenceAudioPath = newAudioKey;
     }
 
-    const updatedResource = await LearningResource.findByIdAndUpdate(
-      req.params.id, 
-      updateData, 
-      { new: true, runValidators: true }
-    );
+    const updatedResource = req.file && storage.driver === 'r2'
+      ? await LearningResource.findOneAndUpdate(
+        { _id: req.params.id, referenceAudioPath: existingResource.referenceAudioPath },
+        updateData, { new: true, runValidators: true })
+      : await LearningResource.findByIdAndUpdate(req.params.id, updateData, { new: true, runValidators: true });
     if (!updatedResource) {
       await deleteStoredFile(newAudioKey, 'orphaned replacement upload');
-      return res.status(404).json({ message: "Resource not found" });
+      await audioStorage.cleanupTemp(req.file);
+      return res.status(req.file && storage.driver === 'r2' ? 409 : 404).json({ message: 'Resource changed or no longer exists. Refresh and try again.' });
     }
+    saved = true;
+    await audioStorage.committed(newAudioKey);
     if (oldAudioKey && oldAudioKey !== newAudioKey) {
       await deleteStoredFile(oldAudioKey, 'replaced resource audio');
     }
+    await audioStorage.cleanupTemp(req.file, { preserveLocal: true });
     res.status(200).json({ message: "Resource updated successfully!", resource: updatedResource });
   } catch (error) {
-    await deleteStoredFile(newAudioKey, 'failed replacement upload');
-    console.error("Error updating resource:", error);
+    // DB timeout may have committed: let the journal check references later.
+    console.error('Resource update failed; pending cloud cleanup remains journaled.');
+    await audioStorage.cleanupTemp(req.file);
+    if (storageFailure(res, error)) return;
     res.status(500).json({ message: "Error updating resource" });
+  } finally {
+    await audioStorage.cleanupTemp(req.file, { preserveLocal: saved });
   }
 };
 
@@ -206,7 +222,7 @@ exports.reorderResources = async (req, res) => {
     });
     return res.status(200).json({ resources: ordered });
   } catch (error) {
-    console.error('Error reordering resources:', error);
+    logError('resource_reorder_failed', error);
     return res.status(500).json({ message: 'Error reordering resources' });
   }
 };
@@ -217,11 +233,37 @@ exports.deleteResource = async (req, res) => {
     const resource = await LearningResource.findById(req.params.id);
     if (!resource) return res.status(404).json({ message: "Resource not found" });
 
-    await LearningResource.findByIdAndDelete(req.params.id);
+    await audioStorage.prepareRemoval(resource.referenceAudioPath);
+    if (storage.driver === 'r2') {
+      const deleted = await LearningResource.findOneAndDelete({
+        _id: req.params.id, referenceAudioPath: resource.referenceAudioPath,
+      });
+      if (!deleted) return res.status(409).json({ message: 'Resource changed. Refresh and try again.' });
+    } else {
+      await LearningResource.findByIdAndDelete(req.params.id);
+    }
     await deleteStoredFile(resource.referenceAudioPath, 'deleted resource audio');
     res.status(200).json({ message: "Resource deleted successfully" });
   } catch (error) {
-    console.error("Error deleting resource:", error);
+    console.error('Resource deletion failed; cloud cleanup is retryable.');
+    if (storageFailure(res, error)) return;
     res.status(500).json({ message: "Error deleting resource" });
   }
+};
+
+exports.getReferenceAudio = async (req, res) => {
+  let stream;
+  try {
+    const resource = await LearningResource.findById(req.params.id);
+    if (!resource?.referenceAudioPath) return res.status(404).json({ message: 'Reference audio not found' });
+    stream = await storage.openReadStream(resource.referenceAudioPath);
+    res.set('Content-Type', AUDIO_TYPES[path.posix.extname(resource.referenceAudioPath)] || 'application/octet-stream');
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Content-Type-Options', 'nosniff');
+    await pipeline(stream, res);
+  } catch (error) {
+    if (res.headersSent || res.destroyed) return;
+    if (storageFailure(res, error)) return;
+    res.status(503).json({ message: 'Reference audio storage is temporarily unavailable.' });
+  } finally { stream?.destroy(); }
 };

@@ -1,5 +1,6 @@
 const SpeechSession = require('../models/SpeechSession');
 const { storage } = require('./storageService');
+const { logError } = require('./safeLogger');
 
 async function purgeExpiredRecordings() {
   const retentionDays = Number(process.env.RECORDING_RETENTION_DAYS || 30);
@@ -21,7 +22,7 @@ async function purgeExpiredRecordings() {
       await session.save();
       deleted += 1;
     } catch (error) {
-      console.error(`Retention cleanup failed for session ${session._id}:`, error.message);
+      logError('recording_retention_item_failed', error);
     }
   }
   return deleted;
@@ -29,7 +30,7 @@ async function purgeExpiredRecordings() {
 
 function startRetentionSchedule() {
   const run = () => purgeExpiredRecordings().catch((error) => {
-    console.error('Recording retention job failed:', error.message);
+    logError('recording_retention_scan_failed', error);
   });
   run();
   const timer = setInterval(run, 24 * 60 * 60 * 1000);
