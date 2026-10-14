@@ -1,0 +1,2 @@
+# Shell entrypoints must retain Linux line endings on Windows checkouts.
+docker/*.sh text eol=lf
