@@ -5,6 +5,7 @@ const { randomUUID } = require('node:crypto');
 const { Readable } = require('node:stream');
 const { StorageError, AudioFileError } = require('./storageErrors');
 const { inspectAudio, MAX_AUDIO_BYTES, validateAudioHeader } = require('./audioFile');
+const { readOnlyStartup } = require('./readOnlyStartup');
 
 const projectRoot = path.resolve(__dirname, '..');
 
@@ -79,6 +80,13 @@ class LocalStorageProvider extends StorageProvider {
   }
 }
 
+function testPrefix(value = '') {
+  if (value !== '' && !/^deployment-tests\/[a-f0-9]{32}\/$/.test(value)) {
+    throw new Error('Invalid R2_TEST_PREFIX: expected deployment-tests/<32 lowercase hex run ID>/');
+  }
+  return value;
+}
+
 function r2Configuration(env) {
   const required = ['R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
   if (!env.R2_ENDPOINT && !env.R2_ACCOUNT_ID) required.push('R2_ACCOUNT_ID or R2_ENDPOINT');
@@ -93,7 +101,7 @@ function r2Configuration(env) {
       endpoint.pathname !== '/' || endpoint.port || !/^[a-f0-9]{32}(?:\.(?:eu|fedramp))?\.r2\.cloudflarestorage\.com$/i.test(endpoint.hostname)) {
     throw new Error('R2_ENDPOINT must be an HTTPS Cloudflare R2 S3 endpoint without credentials or a path');
   }
-  return { endpoint: endpoint.origin, bucket: env.R2_BUCKET, region: env.R2_REGION || 'auto',
+  return { testPrefix: testPrefix(env.R2_TEST_PREFIX), endpoint: endpoint.origin, bucket: env.R2_BUCKET, region: env.R2_REGION || 'auto',
     credentials: { accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY } };
 }
 
@@ -104,7 +112,8 @@ class R2StorageProvider extends StorageProvider {
     this.driver = 'r2';
     this.temporaryUploads = true;
     this.bucket = config.bucket;
-    this.namespace = `r2:${config.endpoint}/${config.bucket}`;
+    this.testPrefix = testPrefix(config.testPrefix);
+    this.namespace = `r2:${config.endpoint}/${config.bucket}${this.testPrefix ? `/${this.testPrefix}` : ''}`;
     this.client = client || new S3Client({
       endpoint: config.endpoint, region: config.region, credentials: config.credentials,
       maxAttempts: 3, requestChecksumCalculation: 'WHEN_REQUIRED', responseChecksumValidation: 'WHEN_REQUIRED',
@@ -122,18 +131,19 @@ class R2StorageProvider extends StorageProvider {
   createKey(filePath, { category = 'recordings', ownerId } = {}) {
     if (!/^[a-f0-9]{24}$/i.test(String(ownerId))) throw new AudioFileError('Invalid audio owner identifier.');
     const prefix = category === 'reference_audio' ? 'reference-audio' : 'recordings';
-    const key = `${prefix}/${String(ownerId).toLowerCase()}/${randomUUID()}${path.extname(filePath).toLowerCase()}`;
+    const key = `${this.testPrefix}${prefix}/${String(ownerId).toLowerCase()}/${randomUUID()}${path.extname(filePath).toLowerCase()}`;
     this.assertKey(key);
     return key;
   }
 
   assertKey(key) {
-    if (typeof key !== 'string' || !/^(?:recordings|reference-audio)\/[a-f0-9]{24}\/[a-f0-9-]{36}\.(?:wav|mp3|m4a|aac|flac|ogg)$/.test(key)) {
+    if (typeof key !== 'string' || !key.startsWith(this.testPrefix) || !/^(?:recordings|reference-audio)\/[a-f0-9]{24}\/[a-f0-9-]{36}\.(?:wav|mp3|m4a|aac|flac|ogg)$/.test(key.slice(this.testPrefix.length))) {
       throw new StorageError('key');
     }
   }
 
   async storeFile(filePath, { key } = {}) {
+    if (readOnlyStartup()) throw new StorageError('read_only');
     this.assertKey(key);
     const { contentType, size, extension } = await inspectAudio(filePath);
     if (path.posix.extname(key) !== extension) throw new AudioFileError('Audio key and file type do not match.');
@@ -184,6 +194,7 @@ class R2StorageProvider extends StorageProvider {
 
   async delete(key) {
     if (!key) return;
+    if (readOnlyStartup()) throw new StorageError('read_only');
     this.assertKey(key);
     const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
     try {

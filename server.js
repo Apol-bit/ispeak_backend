@@ -2,6 +2,13 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
+const { readOnlyStartup } = require('./services/readOnlyStartup');
+const readOnly = readOnlyStartup();
+// Set before importing any model: model compilation can schedule initialization.
+if (readOnly) {
+  mongoose.set('autoCreate', false);
+  mongoose.set('autoIndex', false);
+}
 const { authenticate, authorizeRoles } = require('./middleware/auth');
 const { storage } = require('./services/storageService');
 const { startRetentionSchedule } = require('./services/retentionService');
@@ -57,6 +64,10 @@ const sessionRoutes = require('./routes/sessionRoutes');
 const resourceRoutes = require('./routes/resourceRoutes');
 
 // MOUNT ROUTES
+// This mode is exclusively for health/networking checks, never API workflows.
+if (readOnly) app.use('/api', (req, res) => res.status(503).json({
+  message: 'Application workflows are unavailable during read-only startup verification',
+}));
 app.use('/api', authRoutes);
 app.use('/api', userRoutes);
 app.use('/api', sessionRoutes);
@@ -87,6 +98,7 @@ let retentionTimer;
 let cleanupTimer;
 
 function validateEnvironment() {
+  if (readOnlyStartup() !== readOnly) throw new Error('Startup mode cannot change after initialization');
   const required = ['MONGO_URI', 'JWT_SECRET'];
   if (isProduction) required.push('CORS_ORIGINS', 'PYTHON_BACKEND_URL');
   const missing = required.filter((name) => !process.env[name]);
@@ -115,11 +127,13 @@ function validateEnvironment() {
 async function startServer() {
   try {
     validateEnvironment();
-    await mongoose.connect(process.env.MONGO_URI);
+    await mongoose.connect(process.env.MONGO_URI, readOnly ? { autoCreate: false, autoIndex: false } : undefined);
     console.log('Successfully connected to MongoDB!');
-    if (storage.driver === 'r2') await StorageCleanup.init();
-    retentionTimer = startRetentionSchedule();
-    cleanupTimer = audioStorage.startCleanupSchedule();
+    if (!readOnly) {
+      if (storage.driver === 'r2') await StorageCleanup.init();
+      retentionTimer = startRetentionSchedule();
+      cleanupTimer = audioStorage.startCleanupSchedule();
+    }
     const PORT = Number(process.env.PORT || 5000);
     await new Promise((resolve, reject) => {
       httpServer = app.listen(PORT, '0.0.0.0', resolve);

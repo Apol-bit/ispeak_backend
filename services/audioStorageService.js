@@ -5,6 +5,7 @@ const SpeechSession = require('../models/SpeechSession');
 const Resource = require('../models/LearningResource');
 const { inspectAudio } = require('./audioFile');
 const { StorageError } = require('./storageErrors');
+const { readOnlyStartup } = require('./readOnlyStartup');
 
 const RECOVERY_DELAY_MS = 24 * 60 * 60 * 1000;
 
@@ -16,6 +17,7 @@ function createAudioStorage({ provider = storage, jobs = Cleanup,
   const filter = key => ({ namespace: provider.namespace, key });
 
   async function prepareRemoval(key, { upload = false } = {}) {
+    if (readOnlyStartup()) throw new StorageError('read_only');
     if (!key || !cloud) return;
     provider.assertKey(key);
     try {
@@ -27,6 +29,7 @@ function createAudioStorage({ provider = storage, jobs = Cleanup,
   }
 
   async function committed(key) {
+    if (readOnlyStartup()) throw new StorageError('read_only');
     if (!key || !cloud) return;
     // A concurrent resource/account delete may have promoted this intent to
     // cleanup after the DB save. Finalizing an upload must not erase that work.
@@ -35,6 +38,7 @@ function createAudioStorage({ provider = storage, jobs = Cleanup,
   }
 
   async function removeIfUnreferenced(key) {
+    if (readOnlyStartup()) throw new StorageError('read_only');
     if (!key) return;
     if (!cloud) {
       try { await provider.delete(key); }
@@ -56,6 +60,7 @@ function createAudioStorage({ provider = storage, jobs = Cleanup,
   }
 
   async function storeUpload(file, options) {
+    if (readOnlyStartup()) throw new StorageError('read_only');
     // Preserve established local session behavior; Python already decodes user
     // recordings. R2 adds a second size/signature guard before any transfer.
     if (cloud) await inspectAudio(file.path);
@@ -73,6 +78,7 @@ function createAudioStorage({ provider = storage, jobs = Cleanup,
 
   let running = false;
   async function retryCleanup() {
+    if (readOnlyStartup()) return;
     if (!cloud || running) return;
     running = true;
     try {
@@ -92,6 +98,7 @@ function createAudioStorage({ provider = storage, jobs = Cleanup,
   }
 
   function startCleanupSchedule() {
+    if (readOnlyStartup()) return null;
     if (!cloud) return null;
     void retryCleanup();
     const timer = setInterval(() => void retryCleanup(), 60_000);
