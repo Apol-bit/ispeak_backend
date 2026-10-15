@@ -1,0 +1,432 @@
+{
+  "preparedDate": "2026-10-15",
+  "status": "REVIEW REQUIRED; no clean release commit/build/publication",
+  "hashSemantics": "Raw local working-tree bytes; Git normalization and future build output may differ",
+  "repositories": [
+    {
+      "name": "Node",
+      "head": "c742f3cfe91b6f43ea71f4ec0916a8a105ca477e",
+      "upstream": "origin/main",
+      "pendingReview": [
+        "M docker/validateConfiguration.js",
+        " M scripts/r2LiveProbe.js",
+        " M server.js",
+        " M services/audioStorageService.js",
+        " M services/retentionService.js",
+        " M services/storageService.js",
+        "?? deployment/Caddyfile",
+        "?? deployment/Caddyfile.integration",
+        "?? deployment/DAY2_LOCAL_VERIFICATION.md",
+        "?? deployment/INTEGRATION_IMAGE_PREFLIGHT.md",
+        "?? deployment/LIVE_INTEGRATION_PREFLIGHT.md",
+        "?? deployment/LIVE_TEST_SETUP.md",
+        "?? deployment/LOCAL_VERIFICATION.md",
+        "?? deployment/RAILWAY_RELEASE_CHECKLIST.md",
+        "?? deployment/RAILWAY_SESSION_RUNBOOK.md",
+        "?? deployment/README.md",
+        "?? deployment/READ_ONLY_STARTUP.md",
+        "?? deployment/compose.integration.yaml",
+        "?? deployment/compose.readonly.yaml",
+        "?? deployment/compose.yaml",
+        "?? deployment/prepare_private_test_config.ps1",
+        "?? deployment/private_config_helpers.ps1",
+        "?? deployment/test_private_config.ps1",
+        "?? deployment/verify_compose.py",
+        "?? services/readOnlyStartup.js",
+        "?? test/integrationIsolation.test.js",
+        "?? test/readOnlyStartup.test.js"
+      ],
+      "inputs": [
+        {
+          "path": ".dockerignore",
+          "bytes": 716,
+          "workingTreeSHA256": "69bad3ac7976082a10875679f8f818f1712f523f5d218114086d1214d58fdc31",
+          "tracked": true
+        },
+        {
+          "path": ".gitignore",
+          "bytes": 963,
+          "workingTreeSHA256": "b3c5aee49f1bd888a2e6fc1151c76002130d246e704edb494889def5081053da",
+          "tracked": true
+        },
+        {
+          "path": "Dockerfile",
+          "bytes": 813,
+          "workingTreeSHA256": "46807bda9fb743eac7493c7565e9ddee05a0d79b4a9d41078e482fff11d07d1a",
+          "tracked": true
+        },
+        {
+          "path": "controllers/authController.js",
+          "bytes": 4602,
+          "workingTreeSHA256": "558f6919fef37ab94900b09520d8cdac6c74c7479b8509266ccde2f1412d1eb5",
+          "tracked": true
+        },
+        {
+          "path": "controllers/resourceController.js",
+          "bytes": 11471,
+          "workingTreeSHA256": "37edec71e395717cd645ef4bd110956f3edaa9ae01e34379c6a1632c21adfeae",
+          "tracked": true
+        },
+        {
+          "path": "controllers/sessionController.js",
+          "bytes": 12222,
+          "workingTreeSHA256": "43ecb1efa866b853ec432e4036e70c97c8505752e83da36e9b911b534daa11ea",
+          "tracked": true
+        },
+        {
+          "path": "controllers/userController.js",
+          "bytes": 7812,
+          "workingTreeSHA256": "a639704141ae7c846499d5a0d5761e877ec7231e695bcedad8aecdc5437716ba",
+          "tracked": true
+        },
+        {
+          "path": "docker/validateConfiguration.js",
+          "bytes": 1133,
+          "workingTreeSHA256": "7705fcc7ab7e35a66751588e0f4e57f853b1e40326fcdf4a3dddf333329368da",
+          "tracked": true
+        },
+        {
+          "path": "middleware/analysisAdmission.js",
+          "bytes": 1404,
+          "workingTreeSHA256": "a0eb12dc1a4e7264ea3f9df8a50fc466300dd10ac3179178d8fd3322ae35ef2e",
+          "tracked": true
+        },
+        {
+          "path": "middleware/auth.js",
+          "bytes": 3242,
+          "workingTreeSHA256": "58514ea357506cb45d53482724cde5a1065b65743c828d95c9509cc9499b7847",
+          "tracked": true
+        },
+        {
+          "path": "middleware/rateLimit.js",
+          "bytes": 1120,
+          "workingTreeSHA256": "cd0267b070ebda88639d697263f3bb296d5deacc0450d6a171c22c49e700249c",
+          "tracked": true
+        },
+        {
+          "path": "models/LearningResource.js",
+          "bytes": 2432,
+          "workingTreeSHA256": "35919da5c31f041a5c356728f98ca01f3670fee7b0bb00d2cdc2031efeefd6fe",
+          "tracked": true
+        },
+        {
+          "path": "models/SpeechSession.js",
+          "bytes": 2249,
+          "workingTreeSHA256": "2796b18b55a3c456c97a53f3e0b73dab895c3afe376ef8c07c3808d70200772d",
+          "tracked": true
+        },
+        {
+          "path": "models/StorageCleanup.js",
+          "bytes": 669,
+          "workingTreeSHA256": "b830e4b661a94982ae7bd03fa6af7883acfe0772247400db184974cc17d4c768",
+          "tracked": true
+        },
+        {
+          "path": "models/User.js",
+          "bytes": 1457,
+          "workingTreeSHA256": "bbd1c89e85785bd763ebf2507cff5e08cf32fe82015c2861552a41d08dfaab02",
+          "tracked": true
+        },
+        {
+          "path": "package-lock.json",
+          "bytes": 102105,
+          "workingTreeSHA256": "d1f96ce802c45ceb2fd0b20248952cc0d42652c3a6fd7dbfe29282b631729036",
+          "tracked": true
+        },
+        {
+          "path": "package.json",
+          "bytes": 622,
+          "workingTreeSHA256": "f7674d61774b1f97d0ae3c313c8409188a081a947624b03fd095909067e28996",
+          "tracked": true
+        },
+        {
+          "path": "routes/authRoutes.js",
+          "bytes": 776,
+          "workingTreeSHA256": "7488f896e1c99ae09837f4f9b6ecd43830888751a3d5aa8f5bd80c54434b1235",
+          "tracked": true
+        },
+        {
+          "path": "routes/resourceRoutes.js",
+          "bytes": 2364,
+          "workingTreeSHA256": "7a1222c78acc84e0817a35979da987c91f3b4d0c47ae9a3cb111c86248714910",
+          "tracked": true
+        },
+        {
+          "path": "routes/sessionRoutes.js",
+          "bytes": 2427,
+          "workingTreeSHA256": "c7d83480b54f11d316d4ee72b476e19f3d6d457a9e286651817f9549c9257d8e",
+          "tracked": true
+        },
+        {
+          "path": "routes/userRoutes.js",
+          "bytes": 1091,
+          "workingTreeSHA256": "eed8b3d1aada5ce93a5b0cb3902fd817e258ad40966ede9b437e5c4add5042ea",
+          "tracked": true
+        },
+        {
+          "path": "server.js",
+          "bytes": 6567,
+          "workingTreeSHA256": "67d4bbd27800828039aee13623ed09ccfc426c4d13cdd27d718e3033459151d8",
+          "tracked": true
+        },
+        {
+          "path": "services/analysisResponse.js",
+          "bytes": 4709,
+          "workingTreeSHA256": "aaee18a675e30ed793572d4234c5c30ece9092af1723808c0ee90e446ab9ff26",
+          "tracked": true
+        },
+        {
+          "path": "services/audioFile.js",
+          "bytes": 2080,
+          "workingTreeSHA256": "b79ee2cd8249aa709a92360e104358b3b049de1a6a765b5ab0565dd95aeb4034",
+          "tracked": true
+        },
+        {
+          "path": "services/audioStorageService.js",
+          "bytes": 4963,
+          "workingTreeSHA256": "fa154cbeb9982e0193208747ed842c2de9898c9c2edb0f60d31573bb62828679",
+          "tracked": true
+        },
+        {
+          "path": "services/readOnlyStartup.js",
+          "bytes": 1631,
+          "workingTreeSHA256": "8622aaf69e22f25464df86e3baffb633c2d8a5b3f484d8486b3eb4bdefa936ee",
+          "tracked": false
+        },
+        {
+          "path": "services/retentionService.js",
+          "bytes": 1401,
+          "workingTreeSHA256": "6d5df1528d9c6daac245eeeff00479e8b280beebc4621d714643a63022c04e6e",
+          "tracked": true
+        },
+        {
+          "path": "services/safeLogger.js",
+          "bytes": 847,
+          "workingTreeSHA256": "89a77704d86948b1b44f9513c735695c2dce7a8763880796f2160fd71c088f66",
+          "tracked": true
+        },
+        {
+          "path": "services/securityConfiguration.js",
+          "bytes": 1860,
+          "workingTreeSHA256": "4146581bddd3dd3eb26f3a12e6c1522e940300168abe9d49b9e62554bc742f9f",
+          "tracked": true
+        },
+        {
+          "path": "services/storageErrors.js",
+          "bytes": 837,
+          "workingTreeSHA256": "5fe6daf37c31e994db6669d355003450e1097838185723438bb105365b4f637e",
+          "tracked": true
+        },
+        {
+          "path": "services/storageService.js",
+          "bytes": 9402,
+          "workingTreeSHA256": "586cf46b593b239ecf68ec7fcafb240fa839676b805691f1c4e99ffd128702b1",
+          "tracked": true
+        }
+      ]
+    },
+    {
+      "name": "Python V2",
+      "head": "a8469ebcf150a1bfed33a60dc96fc8fb80c15939",
+      "upstream": "myfork/main",
+      "pendingReview": [
+        "M .dockerignore",
+        " M .gitignore",
+        " M DOCKER.md",
+        " M Dockerfile",
+        " M model.py",
+        " M start_backend.ps1",
+        "?? LOCAL_V6_ACTIVATION.md",
+        "?? MODEL_PROVISIONING.md",
+        "?? MODEL_PROVISIONING_VERIFICATION.md",
+        "?? SECURE_V5_ROLLBACK.md",
+        "?? V5_V6_EVALUATION.md",
+        "?? V6_CANDIDATE_VALIDATION.md",
+        "?? V6_DOCKER_VERIFICATION.md",
+        "?? model_integrity.py",
+        "?? model_manifests/ispeak-v5.json",
+        "?? model_manifests/ispeak-v6.json",
+        "?? testing_script/check_v6_linux.py",
+        "?? testing_script/evaluate_v5_v6.py",
+        "?? testing_script/evaluation_dataset.template.json",
+        "?? testing_script/prepare_v6_candidate.py",
+        "?? testing_script/test_model_integrity.py",
+        "?? testing_script/test_paired_evaluation.py",
+        "?? testing_script/test_v6_candidate.py",
+        "?? testing_script/validate_v6_candidate.py",
+        "?? testing_script/verify_local_activation.py",
+        "?? testing_script/verify_model_provisioning.py",
+        "?? testing_script/verify_provisioned_runtime.py",
+        "?? testing_script/verify_v6_docker.py"
+      ],
+      "inputs": [
+        {
+          "path": ".dockerignore",
+          "bytes": 776,
+          "workingTreeSHA256": "028eaf68fc244e51a1d98c980dba28aa13c6ea81c5cf1fedd1c78e42e38143d1",
+          "tracked": true
+        },
+        {
+          "path": ".gitignore",
+          "bytes": 1364,
+          "workingTreeSHA256": "60e805ea28e4a293fc60ce78bab700daadb4fc05ab0667093a95038cbed43268",
+          "tracked": true
+        },
+        {
+          "path": "Dockerfile",
+          "bytes": 2708,
+          "workingTreeSHA256": "35aaa5392ada07e22e2c326f102b586684b8447580d400d3ae945eb4f9752424",
+          "tracked": true
+        },
+        {
+          "path": "analysis_admission.py",
+          "bytes": 2818,
+          "workingTreeSHA256": "0101700b0b9791dac9a50662e09fd333c1df2dfbaad8db57e5fd477615772ac2",
+          "tracked": true
+        },
+        {
+          "path": "audio_analysis_processing_files/__init__.py",
+          "bytes": 534,
+          "workingTreeSHA256": "277bdc90b5682b8af3b21cd62bd72a78f3b247af786b4397f66c962f1945eabc",
+          "tracked": true
+        },
+        {
+          "path": "audio_analysis_processing_files/articulation/__init__.py",
+          "bytes": 1585,
+          "workingTreeSHA256": "fe9f7de42fd74941576f56f90deb78ca61256d7cb88c9e949065d26889a7bb73",
+          "tracked": true
+        },
+        {
+          "path": "audio_analysis_processing_files/articulation/accurate_pronunciation.py",
+          "bytes": 1964,
+          "workingTreeSHA256": "70eaa7a166781fc7fdbc50f22a314b17aecc4505977cc7bbbf57e80da2dd8adb",
+          "tracked": true
+        },
+        {
+          "path": "audio_analysis_processing_files/articulation/clear_enunciation.py",
+          "bytes": 9399,
+          "workingTreeSHA256": "1ccd84924bc8e16568a8dcb0bc3655eb11290c5c0b2dcdafbe698798bb63dbc9",
+          "tracked": true
+        },
+        {
+          "path": "audio_analysis_processing_files/filler_words.py",
+          "bytes": 10270,
+          "workingTreeSHA256": "6b97794205e5a8d8d32b2c8c449d65494d7de0512c39dca72e06f020d496dc84",
+          "tracked": true
+        },
+        {
+          "path": "audio_analysis_processing_files/speaking_rate.py",
+          "bytes": 2171,
+          "workingTreeSHA256": "39bf4b6e665140f4aba13e8440fb72e34e39caa718a5408aa54fc0eed8e5975e",
+          "tracked": true
+        },
+        {
+          "path": "audio_analysis_processing_files/vocal_variety/__init__.py",
+          "bytes": 355,
+          "workingTreeSHA256": "545dcdd60f3e697672543beebd85cb59251114aedf322d42868f13ebd9b81adf",
+          "tracked": true
+        },
+        {
+          "path": "audio_analysis_processing_files/vocal_variety/frequency_pitch.py",
+          "bytes": 6617,
+          "workingTreeSHA256": "cc0d49bdc1235b74b0b12cb128b0ee03a6325a84ec0c75638c751eb2af0d54ed",
+          "tracked": true
+        },
+        {
+          "path": "audio_analysis_processing_files/vocal_variety/signal_intensity.py",
+          "bytes": 5243,
+          "workingTreeSHA256": "1a2b3ebdd744e8dc2abc6574f4ecccc77b17525fda3203878ebd2c4533cc55f9",
+          "tracked": true
+        },
+        {
+          "path": "audio_analysis_processing_files/vocal_variety/temporal_pauses.py",
+          "bytes": 2742,
+          "workingTreeSHA256": "e36068ebbc902a7d19a1d60440f0a657b5580e4903ff6c85946029e2726cd68b",
+          "tracked": true
+        },
+        {
+          "path": "audio_validation.py",
+          "bytes": 4418,
+          "workingTreeSHA256": "ca22ba855b32bcb54122a58d5c783ce6d6b49dc346a66c3b334de4845e7b2205",
+          "tracked": true
+        },
+        {
+          "path": "fastapi_backend.py",
+          "bytes": 13340,
+          "workingTreeSHA256": "552275dae0986e65fb4fa3fc119be58d6bc5e7dae1db8ab9bedfaaf7a48cf59b",
+          "tracked": true
+        },
+        {
+          "path": "model.py",
+          "bytes": 12671,
+          "workingTreeSHA256": "80d253deffcd1eae715c561120db9e16e91fc717ba6a8916a862b48160bd56fa",
+          "tracked": true
+        },
+        {
+          "path": "model_integrity.py",
+          "bytes": 7452,
+          "workingTreeSHA256": "5e190b1a10e59786d244f5cc5a51f0404aba598f90113244a9ed6d96a923b490",
+          "tracked": false
+        },
+        {
+          "path": "model_manifests/ispeak-v5.json",
+          "bytes": 3010,
+          "workingTreeSHA256": "419e667990169868bce3867324047a391ea82c6de1dd7531e4b4fe3ad6b43e66",
+          "tracked": false
+        },
+        {
+          "path": "model_manifests/ispeak-v6.json",
+          "bytes": 2319,
+          "workingTreeSHA256": "b12f97bc4fff844414b51ba73d027d3de740fe9b532adca159c70b6d15807e86",
+          "tracked": false
+        },
+        {
+          "path": "requirements-linux.txt",
+          "bytes": 89,
+          "workingTreeSHA256": "72d611d58a58c18c0dbc17fc6dd024a21b4fe4d4bd6bea48bf4af5fb77477873",
+          "tracked": true
+        },
+        {
+          "path": "requirements.txt",
+          "bytes": 1318,
+          "workingTreeSHA256": "0d24352aabd989ab318580edc9830f51c42f226e23de33d76aced33554150ced",
+          "tracked": true
+        },
+        {
+          "path": "whisper_service.py",
+          "bytes": 19155,
+          "workingTreeSHA256": "8df579d8b382fc1076762d7683260fe1e03aa06a7592010b2bfbf8f5f83c5302",
+          "tracked": true
+        }
+      ]
+    }
+  ],
+  "modelManifests": [
+    {
+      "path": "ispeak_python-backendV2/model_manifests/ispeak-v5.json",
+      "sha256": "419e667990169868bce3867324047a391ea82c6de1dd7531e4b4fe3ad6b43e66"
+    },
+    {
+      "path": "ispeak_python-backendV2/model_manifests/ispeak-v6.json",
+      "sha256": "b12f97bc4fff844414b51ba73d027d3de740fe9b532adca159c70b6d15807e86"
+    }
+  ],
+  "externalModelPolicy": "Private model weights excluded from Git; provision and verify manifest-listed artifacts in an isolated release build context",
+  "resourceProposal": {
+    "python": {
+      "memoryBytes": 8589934592,
+      "cpu": 4,
+      "workers": 1,
+      "inferenceConcurrency": 1
+    },
+    "node": {
+      "memoryBytes": 536870912,
+      "cpu": 1,
+      "replicas": 1
+    }
+  },
+  "registryReleaseDigests": null,
+  "sourceCommitsApproved": false,
+  "publishApproved": false,
+  "paidDeploymentApproved": false
+}
