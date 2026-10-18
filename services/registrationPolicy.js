@@ -27,7 +27,7 @@ function readRegistrationPolicy(env = process.env) {
     }
   }
   if (mode === 'invite' && invitations.size === 0) {
-    throw new Error('Invite registration requires at least one configured invitation hash');
+    throw new Error('REGISTRATION_INVITES_JSON requires at least one configured invitation hash in invite mode');
   }
   return { mode, invitations };
 }
