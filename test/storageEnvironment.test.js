@@ -14,7 +14,7 @@ function validate(values) {
       catch (error) { console.error(error.message); process.exitCode = 1; }
       finally { if (storage?.temporaryUploads) require('node:fs').rmSync(storage.tempRoot, {recursive:true,force:true}); }
     `], { cwd: path.resolve(__dirname, '..'), encoding: 'utf8', env: {
-      ...process.env, NODE_ENV: 'production', MONGO_URI: 'mongodb+srv://example.invalid/not-contacted',
+      ...process.env, NODE_ENV: 'production', REGISTRATION_MODE: 'closed', MONGO_URI: 'mongodb+srv://example.invalid/not-contacted',
       JWT_SECRET: 'environment-test-only-secret-not-for-production', CORS_ORIGINS: 'https://admin.example.invalid',
       PYTHON_SERVICE_TOKEN: 'environment-tests-only-service-token-not-real',
       PYTHON_BACKEND_URL: 'http://python.internal:8000', LOCAL_STORAGE_ROOT: root, STORAGE_DRIVER: 'local',

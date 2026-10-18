@@ -5,7 +5,7 @@ const path = require('node:path');
 const { readOnlyStartup } = require('../services/readOnlyStartup');
 const prefix = `deployment-tests/${'a'.repeat(32)}/`;
 const env = {
-  NODE_ENV: 'production', ISPEAK_READ_ONLY_STARTUP: 'true', ISPEAK_BACKGROUND_JOBS: 'disabled',
+  NODE_ENV: 'production', REGISTRATION_MODE: 'closed', ISPEAK_READ_ONLY_STARTUP: 'true', ISPEAK_BACKGROUND_JOBS: 'disabled',
   ISPEAK_AUTHORIZED_TEST_DATABASE: 'ispeak_integration_fake',
   ISPEAK_AUTHORIZED_R2_TEST_PREFIX: prefix, R2_TEST_PREFIX: prefix,
   MONGO_URI: 'mongodb+srv://ispeak_integration:fake@cluster.example.mongodb.net/ispeak_integration_fake?tls=true',

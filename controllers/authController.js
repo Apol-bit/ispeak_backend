@@ -2,6 +2,7 @@ const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { logError } = require('../services/safeLogger');
+const { readRegistrationPolicy, registrationAllowed } = require('../services/registrationPolicy');
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TERMS_VERSION = process.env.TERMS_VERSION || '1.0';
@@ -37,8 +38,15 @@ function publicUser(user) {
 
 exports.signup = async (req, res) => {
   try {
+    // Revalidate here as well as at startup: invalid settings never open signup.
+    let registrationPolicy;
+    try { registrationPolicy = readRegistrationPolicy(); }
+    catch { return res.status(503).json({ message: 'Registration is temporarily unavailable' }); }
     const { firstName, lastName, username, email, password, acceptTerms, termsVersion } = req.body;
     const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!registrationAllowed(registrationPolicy, normalizedEmail, req.body.invitationCode)) {
+      return res.status(403).json({ message: 'Registration is restricted. Contact the testing coordinator.' });
+    }
     const normalizedUsername = String(username || '').trim().toLowerCase();
     const cleanFirstName = String(firstName || '').trim();
     const cleanLastName = String(lastName || '').trim();

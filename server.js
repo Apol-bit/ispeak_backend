@@ -16,6 +16,7 @@ const { audioStorage } = require('./services/audioStorageService');
 const StorageCleanup = require('./models/StorageCleanup');
 const { logError } = require('./services/safeLogger');
 const { proxyTrust, validateProductionOrigins, validateDatabaseTls } = require('./services/securityConfiguration');
+const { readRegistrationPolicy } = require('./services/registrationPolicy');
 
 const app = express();
 const configuredOrigins = (process.env.CORS_ORIGINS || '')
@@ -98,6 +99,7 @@ let retentionTimer;
 let cleanupTimer;
 
 function validateEnvironment() {
+  readRegistrationPolicy();
   if (readOnlyStartup() !== readOnly) throw new Error('Startup mode cannot change after initialization');
   const required = ['MONGO_URI', 'JWT_SECRET'];
   if (isProduction) required.push('CORS_ORIGINS', 'PYTHON_BACKEND_URL');

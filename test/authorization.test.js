@@ -80,6 +80,17 @@ test('protected endpoint rejects a missing token', async () => {
   assert.equal(response.status, 401);
 });
 
+test('speech uploads reject missing, banned and archived accounts before processing audio', async () => {
+  const upload = token => fetch(`${baseUrl}/api/upload-audio`, {
+    method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  assert.equal((await upload()).status, 401);
+  assert.equal((await upload(tokenFor('banned1'))).status, 403);
+  users.user1.isArchived = true;
+  try { assert.equal((await upload(tokenFor('user1'))).status, 403); }
+  finally { users.user1.isArchived = false; }
+});
+
 test('user can read their own profile without a password hash', async () => {
   const response = await api('/api/user/user1', tokenFor('user1'));
   assert.equal(response.status, 200);

@@ -210,10 +210,10 @@ before admitting longer audio. No timeout increase or new queue is authorized he
    Verify the next session resumes prior users/sessions/recordings. Pro subscription
    charges continue while compute is stopped; volumes/other providers may still bill.
 
-The current API has no general maintenance/intake-stop switch. Announcements and
-an attended restricted testing audience are the first pilot's intake control. A hard
-access gate and automation for unattended public beta remain future review items.
-Do not assume an open public beta can be drained by announcement alone.
+REGISTRATION_MODE=closed stops new registrations only; it does not stop existing
+testers from logging in or submitting audio. The API has no general maintenance or
+intake-stop switch. Drain existing work before shutdown; announcement alone is
+insufficient for an unattended public beta.
 
 Source: [deployment actions](https://docs.railway.com/deployments/deployment-actions).
 
@@ -234,3 +234,90 @@ of Railway history expiration. Rehearse restore and stop/resume before beta/UAT 
 again before defense. Freeze the release before final defense; retain the untouched
 local demonstration setup as fallback. Shutdown/cancel billing decisions after the
 last scheduled event require the owner; removing compute does not cancel Pro.
+
+## Invitation-only registration in Railway Testing
+
+Apply these settings only to the separate Railway **Testing** environment. Do not
+copy Windows demo secrets or edit local .env files. Use a dedicated testing database
+with only reviewed accounts and separate JWT credentials. Preserve existing Atlas
+TLS, R2 storage, proxy trust and rate-limit configuration described above.
+
+Node variables:
+
+- NODE_ENV=production
+- REGISTRATION_MODE=invite (open, invite and closed are the only valid values)
+- REGISTRATION_INVITES_JSON: JSON object mapping each approved email to its code's
+  64-character SHA-256 hex hash; at least one entry is required in invite mode.
+- MONGO_URI: dedicated Testing database URI, supplied privately.
+- JWT_SECRET: separate Testing secret, at least 32 characters.
+- CORS_ORIGINS: exact HTTPS origin of the Testing Flutter Web admin panel.
+- PYTHON_BACKEND_URL=http://${{python.RAILWAY_PRIVATE_DOMAIN}}:8000
+- PYTHON_SERVICE_TOKEN: private token matching Python ISPEAK_SERVICE_TOKEN.
+
+Production startup rejects missing/invalid modes, malformed invitation JSON,
+invalid hashes, duplicate normalized emails and empty invite configuration before
+connecting to MongoDB or listening. An unset mode retains open local development
+signup outside production. Set closed and remove REGISTRATION_INVITES_JSON when no
+further invitations are needed. A malformed supplied JSON value fails validation
+even in open or closed mode. Configuration changes require a new process/restart.
+
+Generate each invitation on a trusted operator machine with the following command.
+It prints the plaintext code ONCE for private delivery and the JSON hash entry for
+Railway. Do not run it in CI, captured terminals, shared sessions or deployment logs.
+The email is a placeholder; replace it with the approved tester email. No secrets
+are passed on the command line or written to a file.
+
+Use this stdin form in Windows PowerShell 5.1 or PowerShell 7:
+
+```powershell
+@'
+const c = require('node:crypto');
+const email = 'tester@example.invalid'; // Replace with the approved email.
+const code = c.randomBytes(32).toString('base64url');
+console.log('Deliver privately: ' + code);
+console.log('Railway hash entry: ' + JSON.stringify({
+  [email.trim().toLowerCase()]: c.createHash('sha256').update(code).digest('hex')
+}));
+'@ | node
+```
+
+Merge hash entries into one JSON object in REGISTRATION_INVITES_JSON. Store only
+hashes there, never plaintext codes or tester passwords. Deliver the code directly
+to its approved email over a trusted private channel, along with the Testing app
+and instructions to register using that email and choose their own password.
+Treat codes as bearer secrets: possessing the code and knowing its email permits
+registration; this is not an independent email-verification service.
+
+Build the Flutter Android testing client with:
+
+```powershell
+flutter build apk --dart-define=API_BASE_URL=https://<testing-node-host>/api --dart-define=REGISTRATION_INVITE_REQUIRED=true
+```
+
+The flag enables the signup field only, not backend enforcement. No invitation
+codes or server tokens belong in dart-defines. Local flutter run remains unchanged.
+The Web admin panel uses its existing HTTPS API_BASE_URL, login and role checks;
+it has no signup flow. Provision/review admin and validator accounts separately;
+signup always retains the default user role.
+
+Python v6 stays private in the same Testing environment: no public domain or TCP
+proxy, ISPEAK_ENV=production, empty browser CORS origins, and a strong matching
+ISPEAK_SERVICE_TOKEN. Flutter calls only Node, never Python.
+
+Before opening testing, review all existing accounts. Ban/archive unapproved ones:
+the signup gate alone does not revoke existing JWTs or restrict existing accounts.
+The existing middleware rechecks account status per request, including uploads.
+Remove an invitation after onboarding; deleting an account while its invitation
+remains configured permits registration again. This minimal configuration-backed
+design has no durable consumption tracking, expiry or email delivery automation.
+Existing unique email/username indexes prevent concurrent duplicate accounts.
+Rotating/removing codes does not revoke registered accounts; use ban/archive.
+
+Local verification (no cloud services required):
+
+```powershell
+# In ispeak_backend
+npm.cmd test
+# In ispeak_frontend
+flutter test
+```
