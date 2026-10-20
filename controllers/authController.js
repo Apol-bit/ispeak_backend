@@ -44,8 +44,8 @@ exports.signup = async (req, res) => {
     catch { return res.status(503).json({ message: 'Registration is temporarily unavailable' }); }
     const { firstName, lastName, username, email, password, acceptTerms, termsVersion } = req.body;
     const normalizedEmail = String(email || '').trim().toLowerCase();
-    if (!registrationAllowed(registrationPolicy, normalizedEmail, req.body.invitationCode)) {
-      return res.status(403).json({ message: 'Registration is restricted. Contact the testing coordinator.' });
+    if (!registrationAllowed(registrationPolicy)) {
+      return res.status(403).json({ message: 'Registration is currently unavailable. Please try again later.' });
     }
     const normalizedUsername = String(username || '').trim().toLowerCase();
     const cleanFirstName = String(firstName || '').trim();
@@ -79,6 +79,7 @@ exports.signup = async (req, res) => {
       username: normalizedUsername,
       email: normalizedEmail,
       password: hashedPassword,
+      role: 'user',
       status: 'Active',
       termsAcceptedAt: new Date(),
       termsVersion: TERMS_VERSION,

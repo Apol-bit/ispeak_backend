@@ -1,7 +1,9 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config();
+if (process.env.ISPEAK_LOCAL_AUDIO_UAT !== 'true') require('dotenv').config();
+const { localAudioUat } = require('./services/localAudioUat');
+const audioUat = localAudioUat();
 const { readOnlyStartup } = require('./services/readOnlyStartup');
 const readOnly = readOnlyStartup();
 // Set before importing any model: model compilation can schedule initialization.
@@ -99,6 +101,7 @@ let retentionTimer;
 let cleanupTimer;
 
 function validateEnvironment() {
+  if (localAudioUat() !== audioUat) throw new Error('Local UAT mode cannot change after initialization');
   readRegistrationPolicy();
   if (readOnlyStartup() !== readOnly) throw new Error('Startup mode cannot change after initialization');
   const required = ['MONGO_URI', 'JWT_SECRET'];
@@ -133,12 +136,12 @@ async function startServer() {
     console.log('Successfully connected to MongoDB!');
     if (!readOnly) {
       if (storage.driver === 'r2') await StorageCleanup.init();
-      retentionTimer = startRetentionSchedule();
+      if (!audioUat) retentionTimer = startRetentionSchedule();
       cleanupTimer = audioStorage.startCleanupSchedule();
     }
     const PORT = Number(process.env.PORT || 5000);
     await new Promise((resolve, reject) => {
-      httpServer = app.listen(PORT, '0.0.0.0', resolve);
+      httpServer = app.listen(PORT, audioUat ? '127.0.0.1' : '0.0.0.0', resolve);
       httpServer.once('error', reject);
     });
     console.log(`Server is listening on port ${PORT}`);

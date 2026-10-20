@@ -206,6 +206,7 @@ class R2StorageProvider extends StorageProvider {
 }
 
 function createStorageProvider(env = process.env) {
+  require('./localAudioUat').localAudioUat(env);
   const driver = (env.STORAGE_DRIVER || 'local').toLowerCase();
   if (driver === 'local') {
     return new LocalStorageProvider(env.LOCAL_STORAGE_ROOT || 'uploads');

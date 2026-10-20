@@ -235,89 +235,36 @@ again before defense. Freeze the release before final defense; retain the untouc
 local demonstration setup as fallback. Shutdown/cancel billing decisions after the
 last scheduled event require the owner; removing compute does not cancel Pro.
 
-## Invitation-only registration in Railway Testing
+## Open registration in Railway Testing ? October 21 decision
 
-Apply these settings only to the separate Railway **Testing** environment. Do not
-copy Windows demo secrets or edit local .env files. Use a dedicated testing database
-with only reviewed accounts and separate JWT credentials. Preserve existing Atlas
-TLS, R2 storage, proxy trust and rate-limit configuration described above.
+The owner confirmed open signup with no invitation-code functionality. This
+supersedes the former invitation procedure. Do not generate invitation codes or
+use REGISTRATION_INVITE_REQUIRED build flags.
 
-Node variables:
+For the approved future Testing configuration, explicitly set
+REGISTRATION_MODE=open. Production accepts only explicit open or closed; obsolete
+invite and missing production modes fail validation before database connection.
+REGISTRATION_INVITES_JSON is unused and can be removed during the approved cloud
+configuration change. No Railway variables were changed by this preparation.
 
-- NODE_ENV=production
-- REGISTRATION_MODE=invite (open, invite and closed are the only valid values)
-- REGISTRATION_INVITES_JSON: JSON object mapping each approved email to its code's
-  64-character SHA-256 hex hash; at least one entry is required in invite mode.
-- MONGO_URI: dedicated Testing database URI, supplied privately.
-- JWT_SECRET: separate Testing secret, at least 32 characters.
-- CORS_ORIGINS: exact HTTPS origin of the Testing Flutter Web admin panel.
-- PYTHON_BACKEND_URL=http://${{python.RAILWAY_PRIVATE_DOMAIN}}:8000
-- PYTHON_SERVICE_TOKEN: private token matching Python ISPEAK_SERVICE_TOKEN.
+Keep valid email/name/username checks, password hashing and minimum length,
+current terms acceptance, duplicate protection, role=user, and JWT/RBAC/ownership
+controls. Signup and login share the per-IP auth limiter: default 20 attempts per
+15 minutes. It is in memory and resets on restart; it is not distributed abuse
+protection. Verify trusted proxy handling and actual 429/Retry-After behavior at
+the Railway HTTPS edge before opening Testing. No CAPTCHA or email verification
+is implemented; decide whether provider edge limits are needed for the pilot.
 
-Production startup rejects missing/invalid modes, malformed invitation JSON,
-invalid hashes, duplicate normalized emails and empty invite configuration before
-connecting to MongoDB or listening. An unset mode retains open local development
-signup outside production. Set closed and remove REGISTRATION_INVITES_JSON when no
-further invitations are needed. A malformed supplied JSON value fails validation
-even in open or closed mode. Configuration changes require a new process/restart.
+Build the Flutter client using only its Testing HTTPS API_BASE_URL. Signup has no
+invitation field and sends normal user details and terms acceptance. Admin login
+and role checks remain separate; signup never grants an administrator role.
 
-Generate each invitation on a trusted operator machine with the following command.
-It prints the plaintext code ONCE for private delivery and the JSON hash entry for
-Railway. Do not run it in CI, captured terminals, shared sessions or deployment logs.
-The email is a placeholder; replace it with the approved tester email. No secrets
-are passed on the command line or written to a file.
+Python remains private in the same environment. Propose explicit Python PORT=8000
+and Node PYTHON_BACKEND_URL=http://${{ispeak-python.RAILWAY_PRIVATE_DOMAIN}}:${{ispeak-python.PORT}}.
+The image gives PORT precedence over ISPEAK_PORT; do not infer its effective cloud
+listener from ISPEAK_PORT alone. Verify readiness and private authenticated traffic
+in the later approved deployment.
 
-Use this stdin form in Windows PowerShell 5.1 or PowerShell 7:
-
-```powershell
-@'
-const c = require('node:crypto');
-const email = 'tester@example.invalid'; // Replace with the approved email.
-const code = c.randomBytes(32).toString('base64url');
-console.log('Deliver privately: ' + code);
-console.log('Railway hash entry: ' + JSON.stringify({
-  [email.trim().toLowerCase()]: c.createHash('sha256').update(code).digest('hex')
-}));
-'@ | node
-```
-
-Merge hash entries into one JSON object in REGISTRATION_INVITES_JSON. Store only
-hashes there, never plaintext codes or tester passwords. Deliver the code directly
-to its approved email over a trusted private channel, along with the Testing app
-and instructions to register using that email and choose their own password.
-Treat codes as bearer secrets: possessing the code and knowing its email permits
-registration; this is not an independent email-verification service.
-
-Build the Flutter Android testing client with:
-
-```powershell
-flutter build apk --dart-define=API_BASE_URL=https://<testing-node-host>/api --dart-define=REGISTRATION_INVITE_REQUIRED=true
-```
-
-The flag enables the signup field only, not backend enforcement. No invitation
-codes or server tokens belong in dart-defines. Local flutter run remains unchanged.
-The Web admin panel uses its existing HTTPS API_BASE_URL, login and role checks;
-it has no signup flow. Provision/review admin and validator accounts separately;
-signup always retains the default user role.
-
-Python v6 stays private in the same Testing environment: no public domain or TCP
-proxy, ISPEAK_ENV=production, empty browser CORS origins, and a strong matching
-ISPEAK_SERVICE_TOKEN. Flutter calls only Node, never Python.
-
-Before opening testing, review all existing accounts. Ban/archive unapproved ones:
-the signup gate alone does not revoke existing JWTs or restrict existing accounts.
-The existing middleware rechecks account status per request, including uploads.
-Remove an invitation after onboarding; deleting an account while its invitation
-remains configured permits registration again. This minimal configuration-backed
-design has no durable consumption tracking, expiry or email delivery automation.
-Existing unique email/username indexes prevent concurrent duplicate accounts.
-Rotating/removing codes does not revoke registered accounts; use ban/archive.
-
-Local verification (no cloud services required):
-
-```powershell
-# In ispeak_backend
-npm.cmd test
-# In ispeak_frontend
-flutter test
-```
+Local validation: npm.cmd test in Node; flutter test --no-pub
+test/signup_submission_test.dart in mobile. Physical signup/login and edge rate
+limiting still require the controlled acceptance session.

@@ -30,11 +30,11 @@ test('history is bounded, retains array contract, and exposes an exclusive curso
 test('compact statistics keep all dates and scores; summary skips session rows', async () => {
   const original={find:Session.find,aggregate:Session.aggregate};let fields;let finds=0;
   Session.find=()=>{finds++;return {sort(){return this;},select(f){fields=f;return this;},async lean(){return [{createdAt:'old-date'},{createdAt:'new-date'}];}};};
-  Session.aggregate=async()=>[{totalSessions:200,avgScore:75}];
+  Session.aggregate=async()=>[{attempts:[{totalSessions:200}],eligible:[{eligibleScoredSessions:2,avgScore:75}]}];
   try {
     const compact=response();await controller.getUserStats({params:{userId:id},query:{view:'compact'}},compact);
     assert.equal(compact.body.sessions.length,2);assert.equal(compact.body.overallStats.totalSessions,200);
-    assert.match(fields,/createdAt/);assert.doesNotMatch(fields,/transcription|wordTimestamps/);
+    assert.match(fields,/createdAt/);assert.match(fields,/practiceMode/);assert.doesNotMatch(fields,/transcription|wordTimestamps/);
     const summary=response();await controller.getUserStats({params:{userId:id},query:{view:'summary'}},summary);
     assert.equal(finds,1);assert.deepEqual(summary.body.sessions,[]);assert.equal(summary.body.overallStats.avgScore,75);
   } finally {Session.find=original.find;Session.aggregate=original.aggregate;}

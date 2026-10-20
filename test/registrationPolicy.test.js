@@ -28,9 +28,9 @@ test('production startup rejects registration misconfiguration before database c
   assert.equal(result.status, 0, result.stderr + result.stdout);
 });
 
-test('local defaults to open; production requires an explicit valid mode', () => {
+test('local registration defaults open; production requires an explicit supported mode', () => {
   assert.equal(readRegistrationPolicy({}).mode, 'open');
-  for (const mode of [undefined, '', 'INVITE', 'invalid']) {
+  for (const mode of [undefined, '', 'invite', 'INVITE', 'invalid']) {
     assert.throws(() => readRegistrationPolicy({ NODE_ENV: 'production', REGISTRATION_MODE: mode }));
   }
   for (const mode of ['open', 'closed']) {
@@ -39,26 +39,27 @@ test('local defaults to open; production requires an explicit valid mode', () =>
   }
 });
 
-test('invitations are email-bound and reject missing, malformed or wrong codes', () => {
+test('open signup requires neither codes nor approved emails', () => {
   const code = randomBytes(32).toString('base64url');
   const hash = createHash('sha256').update(code).digest('hex');
-  const policy = readRegistrationPolicy({ REGISTRATION_MODE: 'invite',
+  const policy = readRegistrationPolicy({ REGISTRATION_MODE: 'open',
     REGISTRATION_INVITES_JSON: JSON.stringify({ 'Tester@Example.test': hash }) });
   assert.equal(registrationAllowed(policy, ' TESTER@example.test ', code), true);
-  assert.equal(registrationAllowed(policy, 'other@example.test', code), false);
+  assert.equal(registrationAllowed(policy, 'other@example.test', code), true);
   for (const invalid of [undefined, null, {}, [], '', 'a'.repeat(5000), randomBytes(32).toString('base64url')]) {
-    assert.equal(registrationAllowed(policy, 'tester@example.test', invalid), false);
+    assert.equal(registrationAllowed(policy, 'tester@example.test', invalid), true);
   }
 });
 
-test('invalid configuration never falls back to open and errors never reveal values', () => {
+test('obsolete invitation configuration is ignored without exposing values', () => {
   const privateValue = 'PRIVATE_CONFIG_VALUE';
   for (const json of [undefined, '', '{', 'null', '[]', '{}',
     JSON.stringify({ 'invalid-email': 'a'.repeat(64) }),
     JSON.stringify({ 'tester@example.test': privateValue }),
     JSON.stringify({ 'tester@example.test': 'a'.repeat(64), ' TESTER@example.test ': 'b'.repeat(64) })]) {
+    assert.equal(readRegistrationPolicy({ REGISTRATION_MODE: 'open', REGISTRATION_INVITES_JSON: json }).mode, 'open');
     assert.throws(() => readRegistrationPolicy({ REGISTRATION_MODE: 'invite', REGISTRATION_INVITES_JSON: json }),
-      error => !error.message.includes(privateValue));
+      error => /REGISTRATION_MODE/.test(error.message) && !error.message.includes(privateValue));
   }
-  assert.throws(() => readRegistrationPolicy({ REGISTRATION_MODE: 'open', REGISTRATION_INVITES_JSON: '[]' }));
+  assert.equal(readRegistrationPolicy({ REGISTRATION_MODE: 'open', REGISTRATION_INVITES_JSON: '[]' }).mode, 'open');
 });

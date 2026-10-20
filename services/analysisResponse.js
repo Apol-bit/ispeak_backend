@@ -1,5 +1,8 @@
+const { isUsableTranscript } = require('./transcriptValidation');
 // Public messages are constructed here, never forwarded from arbitrary upstream text.
 const validationMessages = {
+  recording_too_long: 'The recording exceeds the permitted duration. Please record a shorter speech.',
+  invalid_duration: 'Invalid recording duration metadata. Please record again.',
   recording_too_short: 'The recording is too short. Please record at least one second of speech, preferably a complete sentence.',
   insufficient_speech: 'The recording does not contain enough usable speech. Please record a short sentence in a quiet place and try again.',
   invalid_audio: 'This audio could not be read. Please upload a valid recording in a supported audio format.',
@@ -21,7 +24,7 @@ function mapAiError(error) {
   return { status: 502, message: 'Speech analysis could not be completed. Please try again.' };
 }
 function usableAnalysis(a) {
-  return a?.analysis_valid === true && typeof a.transcription === 'string' && a.transcription.trim().length > 0
+  return a?.analysis_valid === true && isUsableTranscript(a.transcription)
     && Number.isFinite(a.duration_seconds) && a.duration_seconds >= 1
     && Number.isFinite(a.pacing?.wpm) && a.pacing.wpm > 0
     && ['overall', 'pacing', 'clarity', 'energy'].every(k => Number.isFinite(a.scores?.[k]) && a.scores[k] >= 0 && a.scores[k] <= 100);
@@ -44,8 +47,13 @@ function analysisFeedback(a) {
   const clarity = [a.articulation?.score >= 85 ? 'Word timing and audibility were generally clear.' : 'Some word timing or audibility needs practice.'];
   if (!availability.pronunciation) clarity.push('Pronunciation confidence was unavailable.');
   if (!availability.fillers) clarity.push('Filler analysis was unavailable; clarity uses articulation evidence only.');
-  else if (a.fillers.count === 0) clarity.push('No filler spans were detected.');
-  else clarity.push(`Detected filler rate: ${a.fillers.rate}% of recognized words.`);
+  else {
+    if (a.fillers.count === 0) clarity.push(a.fillers.candidate_count > 0 || a.fillers.candidates?.length > 0
+      ? 'No confirmed filler spans; possible fillers need review.'
+      : 'No accepted filler spans were detected; this does not guarantee filler-free speech.');
+    else clarity.push(`Detected ${a.fillers.count} grouped filler spans.`);
+    if (a.fillers.coverage?.status === 'mismatch') clarity.push('Filler analysis may be incomplete because transcript coverage differs.');
+  }
   const energy = [];
   if (intensity?.loudness_status === 'Too loud (shouting)') energy.push('The recorded level is high. Try reducing your volume or moving farther from the microphone.');
   else if (intensity?.loudness_status === 'Too quiet (whispering)') energy.push('The recorded level is low. Try moving closer to the microphone.');

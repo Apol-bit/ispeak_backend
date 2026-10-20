@@ -4,6 +4,7 @@ const { logError } = require('./safeLogger');
 const { readOnlyStartup } = require('./readOnlyStartup');
 
 async function purgeExpiredRecordings() {
+  if (require('./localAudioUat').localAudioUat()) return 0;
   if (readOnlyStartup()) return 0;
   const retentionDays = Number(process.env.RECORDING_RETENTION_DAYS || 30);
   if (!Number.isFinite(retentionDays) || retentionDays <= 0) return 0;
@@ -31,6 +32,7 @@ async function purgeExpiredRecordings() {
 }
 
 function startRetentionSchedule() {
+  if (require('./localAudioUat').localAudioUat()) return null;
   if (readOnlyStartup()) return null;
   const run = () => purgeExpiredRecordings().catch((error) => {
     logError('recording_retention_scan_failed', error);

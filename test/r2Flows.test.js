@@ -26,6 +26,10 @@ const Resource = require('../models/LearningResource');
 const sessions = new Map(); const resources = new Map();
 let sessionFailure, resourceFailure, referenceConflict, pythonStatus, pythonCalls, multipart, deletedUser;
 let holdPython, releasePython, pythonArrived;
+let pythonTranscription;
+let pythonFillers;
+let pythonAssessment, pythonScores;
+let pythonDuration;
 const clone = doc => doc && new doc.constructor(doc.toObject());
 const user = { _id: ownerId, role: 'admin', status: 'Active', isArchived: false };
 User.findById = () => ({ select: async () => user, then: (resolve, reject) => Promise.resolve(user).then(resolve, reject) });
@@ -107,7 +111,9 @@ test.before(async () => {
       multipart = Buffer.concat(chunks);
       const respond = () => {
         res.writeHead(pythonStatus, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(pythonStatus === 200 ? result : { detail: 'test rejection' }));
+        res.end(JSON.stringify(pythonStatus === 200 ? { ...result, transcription: pythonTranscription,
+          fillers: pythonFillers, scores: pythonScores, assessment_details: pythonAssessment,
+          duration_seconds: pythonDuration } : { detail: 'test rejection' }));
       };
       if (holdPython) releasePython = respond;
       else respond();
@@ -122,6 +128,10 @@ test.beforeEach(() => {
   jobs.state.failWrite = false; client.state.fail = ''; client.state.ambiguousPut = false; client.state.brokenRead = false;
   sessionFailure = ''; resourceFailure = false; referenceConflict = false;
   pythonStatus = 200; pythonCalls = 0; multipart = null; deletedUser = false; user.role = 'admin';
+  pythonTranscription = result.transcription;
+  pythonFillers = result.fillers;
+  pythonAssessment = undefined; pythonScores = result.scores;
+  pythonDuration = result.duration_seconds;
   holdPython = false; releasePython = null; pythonArrived = null;
 });
 test.after(async () => {
@@ -135,7 +145,113 @@ test('R2 successful analysis stores only object key, preserves response and clea
   const session = [...sessions.values()][0]; assert.match(session.audioPath, /^recordings\//);
   assert.ok(client.objects.has(session.audioPath)); assert.equal(jobs.rows.size, 0);
   assert.equal(session.status, 'Completed'); assert.deepEqual(scratchFiles(), []);
+  assert.equal(session.transcription, result.transcription);
+  assert.equal(response.body.transcription, result.transcription);
+  assert.equal(response.body.fillerAnalysis.version, 1);
+  assert.equal(response.body.fillerAnalysis.count, 0);
+  assert.deepEqual(session.fillerAnalysis, response.body.fillerAnalysis);
+  assert.equal(typeof response.body.aiFeedback, 'string');
 });
+
+for (const practiceMode of ['ordinary', 'script', 'challenge', undefined]) {
+  test(`activity ${practiceMode ?? 'legacy'} survives upload and mocked persistence`, async () => {
+    const fields = practiceMode ? { practiceMode } : {};
+    if (practiceMode === 'challenge') fields.challengeId = '507f1f77bcf86cd799439099';
+    if (practiceMode === 'script') fields.resourceId = '507f1f77bcf86cd799439098';
+    const response = await upload(fields);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.practiceMode, practiceMode);
+    const session = [...sessions.values()][0];
+    assert.equal(session.practiceMode, practiceMode);
+    if (fields.resourceId) assert.equal(String(session.resourceId), fields.resourceId);
+    if (fields.challengeId) assert.equal(String(session.challengeId), fields.challengeId);
+  });
+}
+
+test('activity schema has no legacy default and rejects unsupported modes', () => {
+  assert.equal(new Session({ userId: ownerId }).practiceMode, undefined);
+  assert.ok(new Session({ userId: ownerId, practiceMode: 'unknown' }).validateSync().errors.practiceMode);
+});
+
+for (const transcription of [undefined, null, '', ' \n ', 'No transcription available',
+  'No transcription available.', '  NO TRANSCRIPTION AVAILABLE.  ']) {
+  test(`invalid Python transcript ${JSON.stringify(transcription)} never persists session or R2 audio`, async () => {
+    pythonTranscription = transcription;
+    const response = await upload();
+    assert.equal(response.status, 502);
+    assert.equal(sessions.size, 0);
+    assert.equal(client.objects.size, 0);
+    assert.equal(client.calls.some(call => call.operation === 'PutObjectCommand'), false);
+    assert.deepEqual(scratchFiles(), []);
+  });
+}
+
+test('valid Filipino Python transcript persists unchanged', async () => {
+  pythonTranscription = 'Magandang araw sa inyong lahat.';
+  const response = await upload({ language: 'Filipino' });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.transcription, pythonTranscription);
+  assert.equal([...sessions.values()][0].transcription, pythonTranscription);
+});
+
+for (const durationSeconds of ['301', '300.001', 'NaN', '-1', '']) {
+  test(`duration ${durationSeconds} is rejected before Python and permanent storage`, async () => {
+    const response = await upload({ durationSeconds });
+    assert.equal(response.status, 400); assert.equal(pythonCalls, 0);
+    assert.equal(client.objects.size, 0); assert.equal(sessions.size, 0);
+    assert.deepEqual(scratchFiles(), []);
+  });
+}
+
+test('trusted challenge limit is forwarded and excessive declared duration rejected', async () => {
+  const resource = new Resource({ type: 'Challenge', title: 'Fixture', description: 'Fixture', timeLimitSeconds: 60 });
+  resources.set(String(resource._id), resource);
+  assert.equal((await upload({ challengeId: String(resource._id), durationSeconds: '61' })).status, 400);
+  assert.equal(pythonCalls, 0);
+  assert.equal((await upload({ challengeId: String(resource._id), durationSeconds: '60' })).status, 200);
+  assert.match(multipart.toString(), /name="max_duration_seconds"\r\n\r\n60/);
+});
+
+test('spoofed short declaration cannot make excessive decoded result persist', async () => {
+  pythonDuration = 301;
+  assert.equal((await upload({ durationSeconds: '1' })).status, 400);
+  assert.equal(pythonCalls, 1); assert.equal(client.objects.size, 0); assert.equal(sessions.size, 0);
+  assert.deepEqual(scratchFiles(), []);
+});
+
+test('Python scoring evidence survives successful API and mocked Mongo persistence', async () => {
+  const { spawnSync } = require('node:child_process');
+  const fixture = spawnSync('python', ['-B', path.resolve(__dirname,
+    '../../ispeak_python-backendV2/testing_script/test_assessment_details.py'), '--fixture'], { encoding: 'utf8' });
+  assert.equal(fixture.status, 0, fixture.stderr);
+  const r = JSON.parse(fixture.stdout);
+  pythonScores = r.scores; pythonAssessment = r.assessment_details; pythonFillers = r.fillers;
+  const response = await upload();
+  assert.equal(response.status, 200);
+  assert.equal(response.body.assessmentDetails.scores.overall, 96.8);
+  assert.equal(response.body.assessmentDetails.completeness, 'complete');
+  assert.equal(response.body.status, 'Completed');
+  assert.equal(response.body.analysisValid, true);
+  assert.deepEqual([...sessions.values()][0].assessmentDetails, response.body.assessmentDetails);
+});
+
+for (const state of ['positive', 'uncertain', 'unavailable']) {
+  test(`filler ${state} evidence persists through upload and serialization`, async () => {
+    const item = { word: 'um um', start: 0, end: 1, confidence: state === 'uncertain' ? .59 : .95 };
+    pythonFillers = { analysis_available: state !== 'unavailable', count: state === 'positive' ? 1 : 0,
+      score: state === 'unavailable' ? null : 100, rate: 0,
+      words: state === 'positive' ? [item] : [], candidates: state === 'uncertain' ? [item] : [],
+      coverage: { status: 'mismatch' }, failure: { code: 'classifier_inference_failed' } };
+    const response = await upload();
+    assert.equal(response.status, 200);
+    assert.deepEqual([...sessions.values()][0].fillerAnalysis, response.body.fillerAnalysis);
+    assert.equal(response.body.fillerAnalysis.count, state === 'unavailable' ? null : state === 'positive' ? 1 : 0);
+    assert.equal(response.body.fillerAnalysisAvailable, state !== 'unavailable');
+    assert.equal(response.body.fillerWordCount, state === 'positive' ? 1 : 0);
+    if (state === 'uncertain') assert.equal(response.body.fillerAnalysis.candidateCount, 1);
+    if (state === 'positive') assert.equal(response.body.fillerAnalysis.words[0].confidence, .95);
+  });
+}
 
 for (const status of [400, 500, 503]) test(`Python ${status} never uploads durable audio or saves a completed session`, async () => {
   pythonStatus = status; const response = await upload(); assert.equal(response.status, status === 500 ? 502 : status);

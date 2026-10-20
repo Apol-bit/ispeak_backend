@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { randomBytes, createHash } = require('node:crypto');
+const { randomBytes } = require('node:crypto');
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
@@ -15,10 +15,9 @@ app.use('/api', require('../routes/authRoutes'));
 let server, url, saved, lookups;
 const originalFind = User.findOne;
 const originalSave = User.prototype.save;
-const code = randomBytes(32).toString('base64url');
 const payload = { firstName: 'Approved', lastName: 'Tester', username: 'tester',
   email: ' Tester@Example.test ', password: randomBytes(16).toString('hex'),
-  acceptTerms: true, termsVersion: process.env.TERMS_VERSION || '1.0', invitationCode: code };
+  acceptTerms: true, termsVersion: process.env.TERMS_VERSION || '1.0' };
 
 test.before(async () => {
   server = await new Promise(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
@@ -26,10 +25,8 @@ test.before(async () => {
 });
 test.beforeEach(() => {
   saved = []; lookups = 0;
-  process.env.REGISTRATION_MODE = 'invite';
-  process.env.REGISTRATION_INVITES_JSON = JSON.stringify({
-    'tester@example.test': createHash('sha256').update(code).digest('hex'),
-  });
+  process.env.REGISTRATION_MODE = 'open';
+  delete process.env.REGISTRATION_INVITES_JSON;
   User.findOne = async () => { lookups++; return null; };
   User.prototype.save = async function () { saved.push(this); return this; };
 });
@@ -60,17 +57,17 @@ test('approved signup preserves JWT, hashed password, terms and default role', a
   assert.equal(claims.role, 'user');
 });
 
-test('unapproved signup returns generic 403 without database lookups, account or token', async () => {
+test('public signup accepts missing and obsolete codes without email invitations', async () => {
   for (const body of [{ ...payload, invitationCode: undefined },
     { ...payload, invitationCode: randomBytes(32).toString('base64url') },
     { ...payload, email: 'stranger@example.test' }, { ...payload, invitationCode: {} }]) {
     const response = await signup(body);
-    assert.equal(response.status, 403);
+    assert.equal(response.status, 201);
     const result = await response.json();
-    assert.equal(result.token, undefined);
-    assert.equal(result.message, 'Registration is restricted. Contact the testing coordinator.');
+    assert.equal(typeof result.token, 'string');
+    assert.equal(result.user.role, 'user');
   }
-  assert.equal(lookups, 0); assert.equal(saved.length, 0);
+  assert.equal(saved.length, 4);
 });
 
 test('closed and broken settings cannot create accounts', async () => {
@@ -79,12 +76,12 @@ test('closed and broken settings cannot create accounts', async () => {
   process.env.REGISTRATION_MODE = 'invalid';
   assert.equal((await signup()).status, 503);
   process.env.REGISTRATION_MODE = 'invite';
-  delete process.env.REGISTRATION_INVITES_JSON;
   assert.equal((await signup()).status, 503);
   assert.equal(lookups, 0); assert.equal(saved.length, 0);
 });
 
-test('approved invitations do not bypass terms or existing-email checks', async () => {
+test('public signup preserves terms, password and duplicate checks', async () => {
+  assert.equal((await signup({ ...payload, password: 'short' })).status, 400);
   assert.equal((await signup({ ...payload, acceptTerms: false })).status, 400);
   assert.equal((await signup({ ...payload, termsVersion: 'outdated' })).status, 400);
   User.findOne = async () => ({ email: 'tester@example.test' });
@@ -95,8 +92,29 @@ test('approved invitations do not bypass terms or existing-email checks', async 
   assert.equal(saved.length, 0);
 });
 
+test('authentication rate limiter rejects excess attempts', () => {
+  const limiter = require('../middleware/rateLimit').createRateLimiter({ windowMs: 60000, max: 2, message: 'Limited' });
+  let passed = 0, status;
+  const response = { set() {}, status(value) { status = value; return this; }, json() {} };
+  for (let i = 0; i < 3; i++) limiter({ ip: '127.0.0.1' }, response, () => passed++);
+  assert.equal(passed, 2); assert.equal(status, 429);
+});
+
 test('unset local mode preserves signup without invitation', async () => {
   delete process.env.REGISTRATION_MODE;
   delete process.env.REGISTRATION_INVITES_JSON;
   assert.equal((await signup({ ...payload, invitationCode: undefined })).status, 201);
+});
+
+test('the actual signup route rejects excess requests with retry guidance', async () => {
+  let response;
+  for (let attempts = 0; attempts <= 100; attempts++) {
+    response = await signup({});
+    if (response.status === 429) break;
+  }
+  assert.equal(response.status, 429);
+  assert.ok(Number(response.headers.get('retry-after')) > 0);
+  assert.equal(response.headers.get('ratelimit-remaining'), '0');
+  assert.equal(lookups, 0);
+  assert.equal(saved.length, 0);
 });

@@ -14,6 +14,10 @@ const { storageFailure, StorageError } = require('../services/storageErrors');
 const { AUDIO_TYPES } = require('../services/audioFile');
 const { mapAiError, usableAnalysis, analysisFeedback } = require('../services/analysisResponse');
 const { logError } = require('../services/safeLogger');
+const { mapFillerAnalysis } = require('../services/fillerAnalysis');
+const { mapAssessmentDetails } = require('../services/assessmentDetails');
+const { eligibleAssessmentFilter, statisticsPipeline, summarizeStatistics } = require('../services/performanceStatistics');
+const { recordingDuration, TOLERANCE_SECONDS } = require('../services/recordingDuration');
 
 function removeUploadedFile(filePath) {
   if (!filePath) return;
@@ -30,7 +34,7 @@ exports.uploadAudioAI = async (req, res) => {
   let referenceStream;
   let saved = false;
   try {
-    const { language, challengeId, resourceId } = req.body;
+    const { language, challengeId, resourceId, practiceMode } = req.body;
     const userId = req.auth.userId;
     const sessionLanguage = language || 'English';
     if (!req.file) return res.status(400).json({ message: "No file uploaded!" });
@@ -47,20 +51,30 @@ exports.uploadAudioAI = async (req, res) => {
       return res.status(400).json({ message: "Invalid language" });
     }
 
-    const formData = new FormData();
-    recordingStream = fs.createReadStream(req.file.path);
-    formData.append('file', recordingStream);
-    formData.append('language', sessionLanguage);
-
     // Look up either practice resource type to get reference audio (if it exists).
     let referenceAudioPath = null;
     const scoringResourceId = resourceId || challengeId;
+    let resource;
     if (scoringResourceId) {
-      const resource = await LearningResource.findById(scoringResourceId);
+      resource = await LearningResource.findById(scoringResourceId);
       if (resource && resource.referenceAudioPath) {
         referenceAudioPath = resource.referenceAudioPath;
       }
     }
+
+    let durationPolicy;
+    try {
+      durationPolicy = recordingDuration(req.body, resource);
+    } catch (error) {
+      await audioStorage.cleanupTemp(req.file);
+      return res.status(400).json({ message: error.message });
+    }
+    const formData = new FormData();
+    recordingStream = fs.createReadStream(req.file.path);
+    formData.append('file', recordingStream);
+    formData.append('language', sessionLanguage);
+    formData.append('max_duration_seconds', String(durationPolicy.maximum));
+    if (durationPolicy.declared !== undefined) formData.append('duration_seconds', String(durationPolicy.declared));
 
     // If reference audio exists, attach it for comparison scoring
     if (referenceAudioPath) {
@@ -106,19 +120,28 @@ exports.uploadAudioAI = async (req, res) => {
       removeUploadedFile(req.file.path);
       return res.status(502).json({ message: 'Speech analysis did not return a usable result. Please record again.' });
     }
-    const { availability, feedback } = analysisFeedback(aiScores);
+    if (aiScores.duration_seconds > durationPolicy.maximum + TOLERANCE_SECONDS) {
+      await audioStorage.cleanupTemp(req.file);
+      return res.status(400).json({ message: 'The recording exceeds the permitted duration.' });
+    }
+    const fillerAnalysis = mapFillerAnalysis(aiScores.fillers);
+    const assessmentDetails = mapAssessmentDetails(aiScores.assessment_details, aiScores.scores);
+    if (assessmentDetails && (!fillerAnalysis.available || fillerAnalysis.coverage.status !== 'matched'
+      || fillerAnalysis.candidateCount > 0)) assessmentDetails.completeness = 'partial';
+    const { availability, feedback } = analysisFeedback({ ...aiScores,
+      fillers: { ...aiScores.fillers, analysis_available: fillerAnalysis.available } });
 
     // Extract out-of-100 scores from the nested Python dictionary
     const paceScore = aiScores?.scores?.pacing || 0;
     const clarityScore = aiScores?.scores?.clarity || 0;
     const energyScore = aiScores?.scores?.energy || 0;
     const overallScore = aiScores?.scores?.overall || 0;
-    const transcription = aiScores?.transcription || "No transcription available.";
+    const transcription = aiScores.transcription;
 
     // Extract raw counts using the exact keys from Python
     const wpmScore = aiScores?.pacing?.wpm || 0;
-    const fillerWordCount = aiScores?.fillers?.count || 0;
-    const fillerAnalysisAvailable = aiScores?.fillers?.analysis_available === true;
+    const fillerWordCount = fillerAnalysis.count ?? 0;
+    const fillerAnalysisAvailable = fillerAnalysis.available;
 
     // Extract word-level timestamps for teleprompter
     const wordTimestamps = aiScores?.word_timestamps || [];
@@ -147,6 +170,7 @@ exports.uploadAudioAI = async (req, res) => {
       analysisFeedback: feedback,
       challengeId: challengeId,
       resourceId: resourceId,
+      practiceMode,
       paceScore,
       clarityScore,
       energyScore,
@@ -154,6 +178,8 @@ exports.uploadAudioAI = async (req, res) => {
       wpmScore,
       fillerWordCount,
       fillerAnalysisAvailable,
+      fillerAnalysis,
+      assessmentDetails,
       transcription,
       aiFeedback,
       wordTimestamps
@@ -238,38 +264,27 @@ exports.getUserStats = async (req, res) => {
       return res.status(400).json({ message: "Invalid User ID format", sessions: [], overallStats: null });
     }
 
-    // Compact rows retain EVERY date/score used by lifetime averages, local
-    // calendar streaks and weekly charts. Legacy callers retain full rows.
+    // Every statistics view returns eligible performance rows only. History
+    // remains the separate all-attempts endpoint; compact omits transcript text.
     const view = req.query.view;
     if (view && !['compact', 'summary'].includes(view)) {
       return res.status(400).json({ message: 'Unsupported statistics view' });
     }
     let sessions = [];
     if (view !== 'summary') {
-      let query = SpeechSession.find({ userId }).sort({ createdAt: 1 });
+      let query = SpeechSession.find({ userId, ...eligibleAssessmentFilter() }).sort({ createdAt: 1 });
       if (view === 'compact') {
-        query = query.select('createdAt language overallScore paceScore clarityScore energyScore');
+        query = query.select('createdAt language practiceMode overallScore paceScore clarityScore energyScore');
       } else {
         query = query.select('-audioPath').populate('challengeId').populate('resourceId');
       }
       sessions = await query.lean();
     }
 
-    const stats = await SpeechSession.aggregate([
-      { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-      {
-        $group: {
-          _id: "$userId",
-          totalSessions: { $sum: 1 },
-          avgScore: { $avg: "$overallScore" },
-          avgPace: { $avg: "$paceScore" },
-          avgClarity: { $avg: "$clarityScore" },
-          avgEnergy: { $avg: "$energyScore" }
-        }
-      }
-    ]);
+    const stats = await SpeechSession.aggregate(statisticsPipeline({ userId: new mongoose.Types.ObjectId(userId) }));
 
-    res.status(200).json({ sessions, overallStats: stats[0] || null });
+    res.status(200).json({ statisticsVersion: 1, sessions,
+      overallStats: { _id: userId, ...summarizeStatistics(stats[0]) } });
   } catch (error) {
     logError('stats_query_failed', error);
     res.status(500).json({ message: "Error calculating stats" });
@@ -279,10 +294,11 @@ exports.getUserStats = async (req, res) => {
 exports.getAdminGlobalStats = async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
-    const totalSessions = await SpeechSession.countDocuments();
-    const globalStats = await SpeechSession.aggregate([{ $group: { _id: null, avgOverall: { $avg: "$overallScore" } } }]);
+    const globalStats = await SpeechSession.aggregate(statisticsPipeline());
+    const stats = summarizeStatistics(globalStats[0]);
 
-    res.status(200).json({ totalUsers, totalSessions, avgAppScore: Math.round(globalStats[0]?.avgOverall || 0) });
+    res.status(200).json({ totalUsers, ...stats, statisticsVersion: 1,
+      avgAppScore: Math.round(stats.avgScore ?? 0), avgScoreAvailable: stats.eligibleScoredSessions > 0 });
   } catch (error) {
     res.status(500).json({ message: "Error fetching stats" });
   }

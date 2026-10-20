@@ -32,11 +32,11 @@ const validJson = JSON.stringify({ [dummyEmail]: dummyHash });
 for (const [label, settings, field] of [
   ['missing production mode', {}, 'REGISTRATION_MODE'],
   ['invalid mode', { REGISTRATION_MODE: 'PRIVATE_INVALID_MODE' }, 'REGISTRATION_MODE'],
-  ['missing invitations', { REGISTRATION_MODE: 'invite' }, 'REGISTRATION_INVITES_JSON'],
-  ['empty invitations', { REGISTRATION_MODE: 'invite', REGISTRATION_INVITES_JSON: '{}' }, 'REGISTRATION_INVITES_JSON'],
-  ['malformed JSON', { REGISTRATION_MODE: 'invite', REGISTRATION_INVITES_JSON: validJson + 'PRIVATE_CODE' }, 'REGISTRATION_INVITES_JSON'],
-  ['invalid hash', { REGISTRATION_MODE: 'invite', REGISTRATION_INVITES_JSON: JSON.stringify({ [dummyEmail]: 'PRIVATE_CODE' }) }, 'REGISTRATION_INVITES_JSON'],
-  ['non-object JSON', { REGISTRATION_MODE: 'invite', REGISTRATION_INVITES_JSON: '[]' }, 'REGISTRATION_INVITES_JSON'],
+  ['obsolete invite mode', { REGISTRATION_MODE: 'invite' }, 'REGISTRATION_MODE'],
+  ['obsolete invite mode with empty configuration', { REGISTRATION_MODE: 'invite', REGISTRATION_INVITES_JSON: '{}' }, 'REGISTRATION_MODE'],
+  ['obsolete invite mode with malformed JSON', { REGISTRATION_MODE: 'invite', REGISTRATION_INVITES_JSON: validJson + 'PRIVATE_CODE' }, 'REGISTRATION_MODE'],
+  ['obsolete invite mode with private data', { REGISTRATION_MODE: 'invite', REGISTRATION_INVITES_JSON: JSON.stringify({ [dummyEmail]: 'PRIVATE_CODE' }) }, 'REGISTRATION_MODE'],
+  ['obsolete invite mode with array configuration', { REGISTRATION_MODE: 'invite', REGISTRATION_INVITES_JSON: '[]' }, 'REGISTRATION_MODE'],
 ]) {
   test(`container diagnostic identifies ${label} without disclosing values`, () => {
     const result = diagnose(() => readRegistrationPolicy({ NODE_ENV: 'production', ...settings }));
@@ -49,9 +49,9 @@ for (const [label, settings, field] of [
   });
 }
 
-test('valid invitations still pass container configuration validation', () => {
+test('explicit open signup passes container configuration validation without invitations', () => {
   const result = diagnose(() => readRegistrationPolicy({ NODE_ENV: 'production',
-    REGISTRATION_MODE: 'invite', REGISTRATION_INVITES_JSON: validJson }));
+    REGISTRATION_MODE: 'open' }));
   assert.equal(result.exitCode, undefined);
   assert.deepEqual(result.output, []);
 });
