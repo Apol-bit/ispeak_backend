@@ -40,3 +40,10 @@ def valid_builder(data, marker):
 
 def owns_builder(data, name, marker):
     return data.get('Name') == '/' + name and marker in data.get('Config', {}).get('Env', [])
+
+
+def valid_effective_limits(memory_max, swap_max, cpu_max):
+    """Actual cgroup-v2 limits, not merely requested Docker settings."""
+    return (memory_max.strip() == str(BUILDER_RAM)
+            and swap_max.strip() == '0'
+            and cpu_max.split() == [str(BUILDER_CPU_QUOTA), str(BUILDER_CPU_PERIOD)])

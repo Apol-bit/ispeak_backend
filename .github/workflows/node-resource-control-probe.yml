@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
     env:
       PROBE_EXECUTION_APPROVED: 'true'
-      BUILDER_BOOTSTRAP_APPROVED: 'false'
+      BUILDER_BOOTSTRAP_APPROVED: 'true'
       BUILDKIT_IMAGE: moby/buildkit@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
       ACTIONS_STEP_DEBUG: 'false'
     steps:

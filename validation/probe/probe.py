@@ -15,7 +15,7 @@ import time
 import tomllib
 from pathlib import Path
 
-from policy import failures, owns_builder, valid_builder
+from policy import failures, owns_builder, valid_builder, valid_effective_limits
 
 
 def emit(kind, **fields):
@@ -180,7 +180,7 @@ class Probe:
         if not re.fullmatch(r'moby/buildkit@sha256:[a-f0-9]{64}', image):
             raise RuntimeError('Immutable reviewed builder image required')
         config = self.root / 'buildkitd.toml'
-        config.write_text('[worker.oci]\n  max-parallelism = 1\n')
+        config.write_text('[worker.oci]\n  enabled = true\n  max-parallelism = 1\n[worker.containerd]\n  enabled = false\n')
         # Refuse collisions rather than taking over any existing builder/container.
         status, _ = self.command(['docker', 'inspect', self.name], check=False)
         if status == 0:
@@ -198,12 +198,65 @@ class Probe:
             raise RuntimeError('Builder identity/cap verification failed')
         # Verify that the exact bytes handed to BuildKit are present in the live config.
         live = self.command(['docker', 'exec', data['Id'], 'cat', '/etc/buildkit/buildkitd.toml'])
-        if tomllib.loads(live.decode()).get('worker', {}).get('oci', {}).get('max-parallelism') != 1:
-            raise RuntimeError('Live builder parallelism setting unverified')
+        worker = tomllib.loads(live.decode()).get('worker', {})
+        if (worker.get('oci', {}).get('max-parallelism') != 1
+                or worker.get('oci', {}).get('enabled') is not True
+                or worker.get('containerd', {}).get('enabled') is not False):
+            raise RuntimeError('Live single-worker parallelism setting unverified')
+        self.verify_effective_builder(data, image)
         emit('builder_caps', id=data['Id'], memory_bytes=data['HostConfig']['Memory'],
              memory_swap_bytes=data['HostConfig']['MemorySwap'], cpus=2, parallelism=1,
              restart_policy='no', solve_performed=False)
         self.stable_gate('after_builder')
+
+    def verify_effective_builder(self, data, image):
+        state = data['State']
+        if (not state['Running'] or state.get('OOMKilled')
+                or data.get('RestartCount') != 0 or state.get('Pid', 0) <= 0):
+            raise RuntimeError('Builder is not continuously healthy')
+        pinned = json.loads(self.command(['docker', 'image', 'inspect', image]))[0]
+        if data['Image'] != pinned['Id'] or data['Config']['Image'] != image:
+            raise RuntimeError('Running builder image identity mismatch')
+        # Host PID binds the kernel accounting to this exact inspected container.
+        pid_root = Path('/proc') / str(state['Pid'])
+        membership = (pid_root / 'cgroup').read_text().splitlines()
+        if len(membership) != 1 or not membership[0].startswith('0::/'):
+            raise RuntimeError('Reviewed cgroup-v2 layout required; no fallback')
+        relative = membership[0][3:].lstrip('/')
+        cgroup = (Path('/sys/fs/cgroup') / relative).resolve(strict=True)
+        if (not cgroup.is_relative_to(Path('/sys/fs/cgroup').resolve())
+                or data['Id'] not in str(cgroup)):
+            raise RuntimeError('Builder cgroup identity not established')
+        memory = (cgroup / 'memory.max').read_text()
+        swap = (cgroup / 'memory.swap.max').read_text()
+        cpu = (cgroup / 'cpu.max').read_text()
+        if not valid_effective_limits(memory, swap, cpu):
+            raise RuntimeError('Effective kernel builder limits mismatch')
+        # Confirm the daemon uses the file inspected above, with no alternate
+        # worker/config overrides. Unknown flag spelling fails closed.
+        args = (pid_root / 'cmdline').read_bytes().rstrip(b'\0').decode().split('\0')
+        if not args or Path(args[0]).name != 'buildkitd':
+            raise RuntimeError('Live BuildKit daemon command unverified')
+        for index, arg in enumerate(args[1:], 1):
+            if arg == '--config':
+                if index + 1 >= len(args) or args[index + 1] != '/etc/buildkit/buildkitd.toml':
+                    raise RuntimeError('Alternate BuildKit config selected')
+            elif arg.startswith('--config='):
+                if arg != '--config=/etc/buildkit/buildkitd.toml':
+                    raise RuntimeError('Alternate BuildKit config selected')
+            elif arg.startswith(('--oci-worker', '--containerd-worker', '-config')):
+                raise RuntimeError('Unreviewed BuildKit worker/config override')
+        for entry in data['Config'].get('Env', []):
+            if entry.startswith('BUILDKITD_CONFIG=') and entry != 'BUILDKITD_CONFIG=/etc/buildkit/buildkitd.toml':
+                raise RuntimeError('Alternate BuildKit config environment')
+        again = json.loads(self.command(['docker', 'inspect', data['Id']]))[0]
+        if (again['State']['Pid'] != state['Pid'] or not again['State']['Running']
+                or again.get('RestartCount') != 0):
+            raise RuntimeError('Builder changed during verification')
+        emit('effective_builder_limits', memory_max_bytes=int(memory),
+             memory_swap_max_bytes=int(swap), cpu_max=cpu.strip(),
+             cgroup_version=2, pinned_image_verified=True,
+             live_config_verified=True, candidate_validated=False)
 
     def cleanup(self):
         self.monitor = False
