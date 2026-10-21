@@ -47,3 +47,33 @@ def valid_effective_limits(memory_max, swap_max, cpu_max):
     return (memory_max.strip() == str(BUILDER_RAM)
             and swap_max.strip() == '0'
             and cpu_max.split() == [str(BUILDER_CPU_QUOTA), str(BUILDER_CPU_PERIOD)])
+
+
+def effective_limit_diagnostics(memory_max, swap_max, cpu_max):
+    """Allowlisted numeric/max metadata only; never echo unexpected file text."""
+    def scalar(text):
+        value = text.strip()
+        if value == 'max':
+            return 'max'
+        if value.isascii() and value.isdecimal() and len(value) <= 20:
+            return int(value)
+        return 'malformed'
+
+    memory, swap = scalar(memory_max), scalar(swap_max)
+    fields = cpu_max.split()
+    quota, period = (map(scalar, fields) if len(fields) == 2 else ('malformed', 'malformed'))
+    checks = {
+        'memory_exact': memory_max.strip() == str(BUILDER_RAM),
+        'swap_disabled': swap_max.strip() == '0',
+        'cpu_exact_pair': fields == [str(BUILDER_CPU_QUOTA), str(BUILDER_CPU_PERIOD)],
+    }
+    equivalent_cpu = (type(quota) is int and type(period) is int and period > 0
+                      and quota * BUILDER_CPU_PERIOD == BUILDER_CPU_QUOTA * period)
+    return {'cgroup_version': 2,
+            'actual': {'memory_max_bytes': memory, 'swap_max_bytes': swap,
+                       'cpu_quota_us': quota, 'cpu_period_us': period},
+            'expected': {'memory_max_bytes': BUILDER_RAM, 'swap_max_bytes': 0,
+                         'cpu_quota_us': BUILDER_CPU_QUOTA, 'cpu_period_us': BUILDER_CPU_PERIOD},
+            'checks': checks, 'cpu_ratio_equivalent': equivalent_cpu,
+            'failed_fields': [key for key, passed in checks.items() if not passed],
+            'strict_gate_pass': valid_effective_limits(memory_max, swap_max, cpu_max)}

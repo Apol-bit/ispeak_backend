@@ -15,7 +15,7 @@ import time
 import tomllib
 from pathlib import Path
 
-from policy import failures, owns_builder, valid_builder, valid_effective_limits
+from policy import failures, owns_builder, valid_builder, valid_effective_limits, effective_limit_diagnostics
 
 
 def emit(kind, **fields):
@@ -185,6 +185,7 @@ class Probe:
         status, _ = self.command(['docker', 'inspect', self.name], check=False)
         if status == 0:
             raise RuntimeError('Probe builder name collision')
+        self.verify_owned_absence('before_create')
         self.monitor = True
         self.command(['docker', 'buildx', 'create', '--name', self.builder, '--driver', 'docker-container',
                       '--driver-opt', 'image=' + image, '--driver-opt', 'memory=4g',
@@ -220,16 +221,28 @@ class Probe:
         # Host PID binds the kernel accounting to this exact inspected container.
         pid_root = Path('/proc') / str(state['Pid'])
         membership = (pid_root / 'cgroup').read_text().splitlines()
-        if len(membership) != 1 or not membership[0].startswith('0::/'):
+        unified = len(membership) == 1 and membership[0].startswith('0::/')
+        emit('cgroup_layout', cgroup_version=2 if unified else 'unsupported',
+             docker_reported_version=self.info.get('CgroupVersion')
+             if self.info.get('CgroupVersion') in ('1', '2') else 'unknown')
+        if not unified:
             raise RuntimeError('Reviewed cgroup-v2 layout required; no fallback')
         relative = membership[0][3:].lstrip('/')
         cgroup = (Path('/sys/fs/cgroup') / relative).resolve(strict=True)
         if (not cgroup.is_relative_to(Path('/sys/fs/cgroup').resolve())
                 or data['Id'] not in str(cgroup)):
             raise RuntimeError('Builder cgroup identity not established')
-        memory = (cgroup / 'memory.max').read_text()
-        swap = (cgroup / 'memory.swap.max').read_text()
-        cpu = (cgroup / 'cpu.max').read_text()
+        limits = {}
+        for filename in ('memory.max', 'memory.swap.max', 'cpu.max'):
+            try:
+                # Fixed-size read: only these three identity-bound kernel files.
+                with (cgroup / filename).open() as source:
+                    limits[filename] = source.read(128)
+            except OSError:
+                emit('cgroup_read_failure', field=filename, cgroup_version=2)
+                raise RuntimeError('Effective cgroup metadata unreadable') from None
+        memory, swap, cpu = (limits[key] for key in ('memory.max', 'memory.swap.max', 'cpu.max'))
+        emit('effective_limit_diagnostics', **effective_limit_diagnostics(memory, swap, cpu))
         if not valid_effective_limits(memory, swap, cpu):
             raise RuntimeError('Effective kernel builder limits mismatch')
         # Confirm the daemon uses the file inspected above, with no alternate
@@ -258,6 +271,18 @@ class Probe:
              cgroup_version=2, pinned_image_verified=True,
              live_config_verified=True, candidate_validated=False)
 
+    def verify_owned_absence(self, phase):
+        # Successful scoped list calls distinguish absence from inspect/API errors.
+        containers = self.command(['docker', 'container', 'ls', '--all', '--quiet',
+                                   '--no-trunc', '--filter', 'name=^/' + self.name + '$'])
+        volumes = self.command(['docker', 'volume', 'ls', '--quiet', '--filter',
+                                'name=^' + self.name + '_state$'])
+        emit('owned_resource_absence', phase=phase,
+             container_absent=not bool(containers.strip()),
+             state_volume_absent=not bool(volumes.strip()))
+        if containers.strip() or volumes.strip():
+            raise RuntimeError('Run-scoped container or state volume remains; no blanket removal')
+
     def cleanup(self):
         self.monitor = False
         # A failed workload deadline must not prevent its separate bounded cleanup.
@@ -271,11 +296,15 @@ class Probe:
             stopped = json.loads(self.command(['docker', 'inspect', data['Id']]))[0]
             if stopped['State']['Running']:
                 raise RuntimeError('Builder remains running after cleanup')
+            mounted = [row.get('Name') for row in data.get('Mounts', []) if row.get('Type') == 'volume']
+            if mounted != [self.name + '_state']:
+                raise RuntimeError('Unexpected builder volume; refuse unreviewed removal')
             self.command(['docker', 'buildx', 'rm', self.builder])
         elif (self.root / 'created-registration').exists():
             if (self.root / 'created-registration').read_text() != self.builder:
                 raise RuntimeError('Unrecognized probe registration marker')
             self.command(['docker', 'buildx', 'rm', self.builder])
+        self.verify_owned_absence('after_cleanup')
         # No host daemon stop, image/cache prune or historical state changes.
         # buildx rm may remove only this newly created builder's own state volume.
         if self.root.resolve().parent == Path(os.environ['RUNNER_TEMP']).resolve() and self.root.name.startswith('ispeak-node-probe-') and not self.root.is_symlink():
