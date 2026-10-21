@@ -1,3 +1,4 @@
+# Repeat approved GET-only scope check after environment-secret correction.
 name: Frozen Node candidate validation
 on:
   push:
