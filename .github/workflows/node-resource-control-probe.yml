@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      PROBE_EXECUTION_APPROVED: 'false'
+      PROBE_EXECUTION_APPROVED: 'true'
       BUILDER_BOOTSTRAP_APPROVED: 'false'
       BUILDKIT_IMAGE: moby/buildkit@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
       ACTIONS_STEP_DEBUG: 'false'
