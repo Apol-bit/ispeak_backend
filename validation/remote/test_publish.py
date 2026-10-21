@@ -65,4 +65,33 @@ class Publication(unittest.TestCase):
             with self.assertRaises(RuntimeError):pub.publish(Mock(),{})
 
 
+class SafeRegistryReporting(unittest.TestCase):
+    def test_auth_scope_and_package_denials(self):
+        from reporting import project_output
+        for text,label in [(b'denied: permission_denied: token does not match expected scopes','registry_scope_rejected'),(b'denied: permission_denied: write_package','registry_package_write_rejected')]:
+            result=project_output(text)
+            self.assertIn('permission_denied',result['registry_codes'])
+            self.assertIn(label,result['registry_messages'])
+
+    def test_status_and_code_projection_hides_secrets(self):
+        from reporting import project_output
+        raw=b'HTTP/1.1 403 DENIED status code: 401 Bearer fake-secret https://user:fake-pass@example.invalid/private'
+        result=project_output(raw)
+        self.assertEqual(result['http_error_statuses'],[401,403])
+        self.assertEqual(result['registry_codes'],['DENIED'])
+        self.assertNotIn('fake-',str(result));self.assertNotIn('example.invalid',str(result))
+
+    def test_push_shape_and_publication_stage(self):
+        from reporting import STAGES,command_label
+        self.assertIn('publication_push',STAGES)
+        self.assertEqual(command_label(['docker','push','secret-reference']), 'docker push [arguments withheld]')
+
+    def test_unknown_registry_output_is_withheld(self):
+        from reporting import project_output
+        result=project_output(b'arbitrary secret-private-configuration')
+        self.assertEqual(result['registry_codes'],[])
+        self.assertEqual(result['registry_messages'],[])
+        self.assertNotIn('secret-private',str(result))
+
+
 if __name__=='__main__':unittest.main()

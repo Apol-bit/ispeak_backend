@@ -5,7 +5,7 @@ STAGES = frozenset(('initialization', 'preflight', 'source_export', 'private_bas
     'builder_setup', 'post_builder_preflight', 'build_load', 'image_metadata',
     'image_validation', 'builder_stop', 'node_version', 'node_dependencies',
     'node_test_export', 'node_image_tests', 'node_configuration', 'node_health',
-    'node_shutdown', 'node_source_integrity', 'complete', 'cleanup'))
+    'node_shutdown', 'node_source_integrity', 'complete', 'publication', 'publication_push', 'publication_verify', 'publication_cleanup', 'cleanup'))
 ERROR_CODES = frozenset(('MODULE_NOT_FOUND', 'ERR_MODULE_NOT_FOUND', 'ERR_ASSERTION',
     'ERR_TEST_FAILURE', 'EACCES', 'ENOENT', 'EADDRINUSE', 'ENOMEM', 'ENOSPC', 'EPERM'))
 # Reviewed public test filenames, not arbitrary text parsed from subprocess output.
@@ -30,7 +30,7 @@ def command_label(args):
         return 'git ' + operation + reviewed_file + ' [arguments withheld]'
     if args and args[0] == 'docker':
         allowed = {'run', 'exec', 'inspect', 'stop', 'version', 'pull', 'login',
-                   'container', 'volume', 'image', 'buildx'}
+                   'container', 'volume', 'image', 'buildx', 'tag', 'push'}
         operation = args[1] if len(args) > 1 and args[1] in allowed else 'other'
         if operation == 'buildx' and len(args) > 2 and args[2] in ('build', 'create', 'inspect', 'ls', 'rm', 'version'):
             operation += ' ' + args[2]
@@ -52,7 +52,25 @@ def project_output(data):
                            (r'Invalid container production configuration', 'production_configuration_rejected')):
         if re.search(pattern, text, re.I):
             messages.append(label)
-    return {'error_codes': codes, 'test_files': sorted(name for name in TEST_FILES if name in text),
+    registry_codes = sorted(code for code in ('UNAUTHORIZED', 'DENIED', 'NAME_UNKNOWN', 'NAME_INVALID',
+        'MANIFEST_INVALID', 'MANIFEST_UNKNOWN', 'BLOB_UNKNOWN', 'BLOB_UPLOAD_UNKNOWN',
+        'BLOB_UPLOAD_INVALID', 'DIGEST_INVALID', 'TAG_INVALID', 'TOOMANYREQUESTS',
+        'UNSUPPORTED', 'permission_denied', 'insufficient_scope')
+        if re.search(r'(?<![A-Za-z0-9_])' + re.escape(code) + r'(?![A-Za-z0-9_])', text))
+    registry_messages = [label for pattern, label in (
+        (r'expected scopes|insufficient.scope', 'registry_scope_rejected'),
+        (r'write_package', 'registry_package_write_rejected'),
+        (r'unauthorized|authentication required', 'registry_authentication_rejected'),
+        (r'invalid reference format|invalid tag', 'registry_reference_rejected'),
+        (r'no basic auth credentials', 'registry_credentials_unavailable'),
+        (r'too many requests', 'registry_rate_limited'),
+        (r'x509:', 'registry_tls_error'),
+        (r'i/o timeout|context deadline exceeded', 'registry_timeout'))
+        if re.search(pattern, text, re.I)]
+    http_statuses = sorted(set(int(value) for value in re.findall(
+        r'(?:HTTP/[12](?:\.\d)?\s+|status(?: code)?[:= ]+)([45]\d{2})\b', text, re.I)))
+    return {'registry_codes': registry_codes, 'registry_messages': registry_messages,
+            'http_error_statuses': http_statuses, 'error_codes': codes, 'test_files': sorted(name for name in TEST_FILES if name in text),
             'tap_counts': counts, 'recognized_messages': messages,
             'raw_output_withheld': True, 'diagnostic_bytes_scanned': len(data)}
 

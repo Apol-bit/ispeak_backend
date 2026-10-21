@@ -38,6 +38,7 @@ def publish(v, image):
     credential = os.environ.get('GHCR_READ_TOKEN', '')
     if not credential or os.environ.get('GITHUB_ACTOR') != 'Apol-bit':
         raise RuntimeError('Protected Publisher credential required')
+    v.set_stage('publication')
     name = 'ispeak-' + v.role
     package = 'apol-bit/' + name
     tag = 'testing-' + image['Config']['Labels']['org.opencontainers.image.revision'][:12] + '-' + v.key
@@ -64,6 +65,7 @@ def publish(v, image):
     try:
         v.publication_started = True
         v.evidence('publication_attempt', reference=reference, tested_image_id=image['Id'])
+        v.set_stage('publication_push')
         output = v.docker('push',reference,seconds=600)
         digests = re.findall(rb'digest: (sha256:[a-f0-9]{64})',output)
         if len(set(digests)) != 1:
@@ -71,6 +73,7 @@ def publish(v, image):
         digest = digests[0].decode()
         v.published_digest = digest
         v.evidence('image_pushed',reference=reference,digest=digest, tested_image_id=image['Id'])
+        v.set_stage('publication_verify')
         status, body, _ = get(manifest_url + digest,headers)
         if status != 200 or 'sha256:'+hashlib.sha256(body).hexdigest() != digest or json.loads(body).get('config',{}).get('digest') != image['Id']:
             raise RuntimeError('Published manifest does not match tested image')
@@ -91,6 +94,7 @@ def publish(v, image):
             raise RuntimeError('Authenticated digest pull identity mismatch')
         v.evidence('publication_verified',reference=reference,immutable=immutable,image_id=image['Id'],private=True,anonymous_denied=True,published=True,railway_reader_verified=False)
     finally:
+        v.set_stage('publication_cleanup')
         if immutable:
             v.docker('image','rm',immutable,seconds=20,check=False)
         v.docker('image','rm',reference,seconds=20,check=False)
