@@ -1,3 +1,4 @@
+# One approved recheck using saved original Publisher credential.
 # Repeat approved GET-only scope check after environment-secret correction.
 name: Frozen Node candidate validation
 on:
