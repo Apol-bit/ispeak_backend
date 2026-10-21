@@ -1,0 +1,42 @@
+"""Probe-only policy. Does not import or modify either approved candidate policy."""
+GIB = 1024 ** 3
+NODE_START_RAM = 5 * GIB
+NODE_START_DOCKER_FREE = 20 * GIB
+CONTINUOUS_RAM = 5 * GIB
+CONTINUOUS_DOCKER_FREE = 15 * GIB
+SYSTEM_FREE = 15 * GIB
+STABLE_SECONDS = 60
+BUILDER_RAM = 4 * GIB
+BUILDER_MEMORY_SWAP = 4 * GIB
+BUILDER_CPU_PERIOD = 100000
+BUILDER_CPU_QUOTA = 200000
+# A guard against accidentally generalizing this Node-only approval.
+PYTHON_DOCKER_FREE_UNCHANGED = 50 * GIB
+
+
+def failures(sample, *, start):
+    errors = []
+    if sample['available_ram_bytes'] < NODE_START_RAM or sample['docker_memory_bytes'] < NODE_START_RAM:
+        errors.append('RAM')
+    floor = NODE_START_DOCKER_FREE if start else CONTINUOUS_DOCKER_FREE
+    if not sample['storage_mapping_confirmed']:
+        errors.append('UNCONFIRMED_STORAGE_MAPPING')
+    if not sample['docker_filesystems'] or any(row['available_bytes'] < floor for row in sample['docker_filesystems']):
+        errors.append('DOCKER_DISK')
+    if sample['system_filesystem']['available_bytes'] < SYSTEM_FREE:
+        errors.append('SYSTEM_DISK')
+    if any(row['free_inodes'] <= 0 for row in sample['docker_filesystems'] + [sample['system_filesystem']]):
+        errors.append('INODES')
+    return errors
+
+
+def valid_builder(data, marker):
+    config = data['HostConfig']
+    return (config['Memory'] == BUILDER_RAM and config['MemorySwap'] == BUILDER_MEMORY_SWAP
+            and config['CpuPeriod'] == BUILDER_CPU_PERIOD and config['CpuQuota'] == BUILDER_CPU_QUOTA
+            and config['RestartPolicy']['Name'] == 'no'
+            and marker in data['Config'].get('Env', []))
+
+
+def owns_builder(data, name, marker):
+    return data.get('Name') == '/' + name and marker in data.get('Config', {}).get('Env', [])

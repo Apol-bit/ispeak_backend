@@ -1,0 +1,42 @@
+name: Node resource and builder probe only
+on:
+  push:
+    branches: [ci/node-resource-probe-20261021]
+    paths: [.github/workflows/node-resource-control-probe.yml, validation/probe/**]
+permissions:
+  contents: read
+concurrency:
+  group: node-resource-control-probe
+  cancel-in-progress: false
+jobs:
+  resource-probe-only:
+    if: github.repository == 'Apol-bit/ispeak_backend' && github.actor == 'Apol-bit' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PROBE_EXECUTION_APPROVED: 'false'
+      BUILDER_BOOTSTRAP_APPROVED: 'false'
+      BUILDKIT_IMAGE: moby/buildkit@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
+      ACTIONS_STEP_DEBUG: 'false'
+    steps:
+      - name: Fetch reviewed probe tooling only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/ci/node-resource-probe-20261021
+          test "$PROBE_EXECUTION_APPROVED" = true
+          export GIT_TERMINAL_PROMPT=0
+          git -c core.hooksPath=/dev/null init automation >/dev/null
+          git -C automation remote add origin https://github.com/Apol-bit/ispeak_backend.git
+          git -C automation -c core.hooksPath=/dev/null fetch --depth=1 origin "$GITHUB_SHA" >/dev/null 2>&1
+          git -C automation -c core.hooksPath=/dev/null checkout --detach FETCH_HEAD >/dev/null 2>&1
+          test "$(git -C automation rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Measure resources; optionally inspect a bounded idle builder
+        shell: bash
+        run: python3 -B automation/validation/probe/probe.py
+      - name: Clean up only the probe-owned builder
+        if: always()
+        shell: bash
+        run: |
+          test ! -f automation/validation/probe/probe.py || python3 -B automation/validation/probe/probe.py cleanup
