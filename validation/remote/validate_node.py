@@ -10,10 +10,13 @@ from materialize import export_tests
 
 
 def validate(v, repo, context):
-    version = v.docker('run', '--rm', '--network=none', '--memory=256m', '--cpus=1',
+    version = v.docker(*v.run_args('node-version-' + v.key, memory='256m'), '--rm', '--cpus=1',
                        '--entrypoint=node', v.image, '--version').decode().strip()
     if version != 'v24.21.0':
         raise RuntimeError('Unexpected production Node version')
+    v.docker(*v.run_args('node-dependencies-' + v.key, memory='512m'),
+             '--entrypoint=npm', v.image, 'ls', '--omit=dev', '--all', seconds=60)
+    v.evidence('node_dependencies', result='PASS', lockfile_build=True, installed_tree_checked=True)
     tests = export_tests(repo, v.root, v.command)
     # Sibling Python fixtures/development launcher are not in the production image.
     excluded = {'assessmentDetails.test.js', 'fillerAnalysis.test.js', 'localAudioUat.test.js'}
@@ -68,7 +71,7 @@ def validate(v, repo, context):
     if json.loads(v.docker('inspect', name))[0]['State']['ExitCode'] != 0:
         raise RuntimeError('Node graceful shutdown failed')
     expected = {item.relative_to(context).as_posix(): hashlib.sha256(item.read_bytes()).hexdigest()
-                for item in context.rglob('*') if item.is_file() and item.suffix in ('.js', '.sh')}
+                for item in context.rglob('*') if item.is_file() and item.suffix in ('.js', '.sh', '.json')}
     check = """const fs=require('fs'),crypto=require('crypto');
 const expected=JSON.parse(process.argv[1]);
 for(const [file,hash]of Object.entries(expected)){
@@ -76,7 +79,7 @@ for(const [file,hash]of Object.entries(expected)){
 }
 for(const name of ['.env','.git','recordings'])if(fs.existsSync('/app/'+name))process.exit(1);
 """
-    v.docker('run', '--rm', '--network=none', '--memory=256m', '--cpus=1', '--entrypoint=node',
+    v.docker(*v.run_args('node-source-' + v.key, memory='256m'), '--rm', '--cpus=1', '--entrypoint=node',
              v.image, '-e', check, json.dumps(expected), seconds=30)
     v.evidence('node_startup_security', result='PASS', node_version=version,
                health='fixture-backed HTTP 200 and Docker healthy', graceful_shutdown=True,
