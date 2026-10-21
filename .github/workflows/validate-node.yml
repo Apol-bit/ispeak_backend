@@ -11,9 +11,11 @@ concurrency:
 jobs:
   node-candidate:
     if: github.repository == 'Apol-bit/ispeak_backend' && github.actor == 'Apol-bit' && github.run_attempt == 1
+    environment: ispeak-node-private-publication
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
+      PUBLICATION_APPROVED: 'true'
       ROLE: node
       # Official v0.34.1 registry index resolved read-only; pending draft approval.
       BUILDKIT_IMAGE: moby/buildkit@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
@@ -36,9 +38,13 @@ jobs:
           test "$(git -C automation rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Check validation tooling offline
         shell: bash
-        run: python3 -B automation/validation/remote/test_simplified.py
+        run: |
+          python3 -B automation/validation/remote/test_simplified.py
+          python3 -B automation/validation/remote/test_publish.py
       - name: Validate frozen Node candidate
         shell: bash
+        env:
+          GHCR_READ_TOKEN: ${{ secrets.ISPEAK_GHCR_PUBLISHER }}
         run: python3 -B automation/validation/remote/runner.py node
       - name: Remove only run-owned containers and private temporary files
         if: always()
