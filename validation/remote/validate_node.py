@@ -7,36 +7,45 @@ import time
 from pathlib import Path
 
 from materialize import export_tests
+from node_fixtures import prepare as prepare_test_support
 
 
 def validate(v, repo, context):
+    v.set_stage('node_version')
     version = v.docker(*v.run_args('node-version-' + v.key, memory='256m'), '--rm', '--cpus=1',
                        '--entrypoint=node', v.image, '--version').decode().strip()
     if version != 'v24.21.0':
         raise RuntimeError('Unexpected production Node version')
+    v.set_stage('node_dependencies')
     v.docker(*v.run_args('node-dependencies-' + v.key, memory='512m'),
              '--entrypoint=npm', v.image, 'ls', '--omit=dev', '--all', seconds=60)
     v.evidence('node_dependencies', result='PASS', lockfile_build=True, installed_tree_checked=True)
+    v.set_stage('node_test_export')
     tests = export_tests(repo, v.root, v.command)
+    support_args = prepare_test_support(v, repo)
     # Sibling Python fixtures/development launcher are not in the production image.
     excluded = {'assessmentDetails.test.js', 'fillerAnalysis.test.js', 'localAudioUat.test.js'}
     selected = sorted('/app/test/' + item.name for item in tests.glob('*.test.js') if item.name not in excluded)
     if not selected:
         raise RuntimeError('No production-image tests selected')
+    v.set_stage('node_image_tests')
     result = v.docker(*v.run_args('node-tests-' + v.key, memory='2g'),
+                      *support_args,
                       '--tmpfs', '/app/uploads:rw,size=64m,mode=1777',
                       '--mount', f'type=bind,src={tests},dst=/app/test,readonly',
-                      '--entrypoint=node', v.image, '--test', '--test-concurrency=1', *selected, seconds=240)
+                      '--entrypoint=node', v.image, '--test', '--test-reporter=tap', '--test-concurrency=1', *selected, seconds=240)
     match = re.search(rb'^# pass (\d+)\s*$', result, re.M)
     if not match or int(match[1]) == 0 or re.search(rb'^# fail [1-9]', result, re.M):
         raise RuntimeError('Node image test summary missing or failed')
     v.evidence('node_image_tests', result='PASS', passed=int(match[1]), test_files=len(selected),
                excluded_files=sorted(excluded), full_179_suite_rerun=False)
+    v.set_stage('node_configuration')
     status, diagnostic = v.docker(*v.run_args('node-invalid-' + v.key),
                          '--tmpfs', '/app/uploads:rw,size=16m,mode=1777',
                          v.image, seconds=30, check=False)
     if status == 0 or b'Invalid container production configuration' not in diagnostic:
         raise RuntimeError('Missing production configuration unexpectedly accepted')
+    v.set_stage('node_health')
     fixture = Path(__file__).with_name('node_health_fixture.cjs').resolve()
     settings = {'NODE_ENV': 'production', 'MONGO_URI': 'mongodb://127.0.0.1:1/fixture?tls=true',
                 'JWT_SECRET': secrets.token_hex(32), 'PYTHON_SERVICE_TOKEN': secrets.token_hex(32),
@@ -67,9 +76,11 @@ def validate(v, repo, context):
         time.sleep(1)
     else:
         raise RuntimeError('Docker HEALTHCHECK did not become healthy')
+    v.set_stage('node_shutdown')
     v.docker('stop', '--time=10', name, seconds=20)
     if json.loads(v.docker('inspect', name))[0]['State']['ExitCode'] != 0:
         raise RuntimeError('Node graceful shutdown failed')
+    v.set_stage('node_source_integrity')
     expected = {item.relative_to(context).as_posix(): hashlib.sha256(item.read_bytes()).hexdigest()
                 for item in context.rglob('*') if item.is_file() and item.suffix in ('.js', '.sh', '.json')}
     check = """const fs=require('fs'),crypto=require('crypto');

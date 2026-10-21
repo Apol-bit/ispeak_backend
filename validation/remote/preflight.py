@@ -67,10 +67,12 @@ def problems(role, data, *, start):
         ('SYSTEM_DISK', data['system_free_bytes'] < SYSTEM_FREE)) if failed]
 
 
-def enforce(role, *, stable=False):
+def enforce(role, *, stable=False, observer=None):
     minimum = None
     for sample in range(13 if stable else 1):
         data = measure()
+        if observer is not None:
+            observer(data)
         failed = problems(role, data, start=stable)
         print(json.dumps({'check': 'resources', 'role': role, 'sample': sample,
                           'measurements': data, 'failed_gates': failed}), flush=True)

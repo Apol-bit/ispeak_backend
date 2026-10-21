@@ -15,6 +15,7 @@ import time
 import tomllib
 from pathlib import Path
 
+from reporting import STAGES, command_label, image_record, project_file
 from materialize import BASE, COMMITS, export
 from preflight import enforce, measure, problems
 
@@ -36,6 +37,10 @@ class Validation:
         self.monitor = False
         self.deadline = time.monotonic() + (1800 if role == 'node' else 2400)
         self.minimum = {}
+        self.stage = 'initialization'
+        self.image_metadata = None
+        self.failure = None
+        self.last_command = None
         self.children = set()
         self.docker_env = dict(os.environ)
         # Never propagate the job token into git/build/test/container subprocesses.
@@ -46,44 +51,83 @@ class Validation:
 
     def command(self, args, seconds=60, input_data=None, check=True):
         self.sequence += 1
-        log = self.root / f'command-{self.sequence}.log'
-        with log.open('wb') as output:
-            process = subprocess.Popen(args, stdout=output, stderr=subprocess.STDOUT,
-                                       stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
-                                       start_new_session=True, env=self.docker_env)
-            self.children.add(process)
-            if input_data is not None:
-                process.stdin.write(input_data)
-                process.stdin.close()
-            deadline = min(self.deadline, time.monotonic() + seconds)
-            try:
-                while process.poll() is None:
-                    if time.monotonic() > deadline:
-                        raise RuntimeError('Bounded subprocess timeout; no retry')
-                    if self.monitor:
-                        data = measure()
-                        self.minimum = data if not self.minimum else {
-                            key: min(data[key], self.minimum[key]) for key in data}
-                        failed = problems(self.role, data, start=False)
-                        if failed:
-                            self.evidence('resource_stop', measurements=data, failed_gates=failed)
-                            raise RuntimeError('Resource stop condition reached; no retry')
-                    time.sleep(1)
-                if check and process.returncode:
-                    raise RuntimeError('Validation subprocess failed; raw output withheld; no retry')
-            finally:
-                if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGTERM)
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(process.pid, signal.SIGKILL)
-                        process.wait(timeout=5)
-                self.children.discard(process)
-        data = log.read_bytes()
-        if len(data) > 4 * 1024 * 1024:
-            raise RuntimeError('Unexpected output volume; withheld from public log')
+        stdout_path = self.root / f'command-{self.sequence}.stdout'
+        stderr_path = self.root / f'command-{self.sequence}.stderr'
+        process = None
+        description = {'sequence': self.sequence, 'stage': self.stage,
+                       'command': command_label(args)}
+        try:
+            with stdout_path.open('wb') as output, stderr_path.open('wb') as errors:
+                process = subprocess.Popen(args, stdout=output, stderr=errors,
+                    stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
+                    start_new_session=True, env=self.docker_env)
+                self.children.add(process)
+                deadline = min(self.deadline, time.monotonic() + seconds)
+                try:
+                    if input_data is not None:
+                        process.stdin.write(input_data)
+                        process.stdin.close()
+                    while process.poll() is None:
+                        if time.monotonic() > deadline:
+                            raise RuntimeError('Bounded subprocess timeout; no retry')
+                        if self.monitor:
+                            data = measure()
+                            self.observe(data)
+                            failed = problems(self.role, data, start=False)
+                            if failed:
+                                self.evidence('resource_stop', measurements=data, failed_gates=failed)
+                                raise RuntimeError('Resource stop condition reached; no retry')
+                        time.sleep(1)
+                    if check and process.returncode:
+                        raise RuntimeError('Validation subprocess failed; sanitized report emitted; no retry')
+                finally:
+                    if process.poll() is None:
+                        os.killpg(process.pid, signal.SIGTERM)
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            os.killpg(process.pid, signal.SIGKILL)
+                            process.wait(timeout=5)
+                    self.children.discard(process)
+            # Preserve the original merged-output return contract for existing callers.
+            if stdout_path.stat().st_size + stderr_path.stat().st_size > 4 * 1024 * 1024:
+                raise RuntimeError('Unexpected output volume; raw output withheld')
+            data = stdout_path.read_bytes() + stderr_path.read_bytes()
+        except Exception:
+            self.failure = {**description, 'exit_code': process.returncode if process else None,
+                            'stdout': project_file(stdout_path), 'stderr': project_file(stderr_path)}
+            self.last_command = self.failure
+            self.evidence('subprocess_failure', **self.failure)
+            raise
+        self.last_command = {**description, 'exit_code': process.returncode}
+        if process.returncode:
+            self.last_command.update(stdout=project_file(stdout_path), stderr=project_file(stderr_path))
         return data if check else (process.returncode, data)
+
+    def set_stage(self, stage):
+        if stage not in STAGES:
+            raise RuntimeError('Unknown reporting stage')
+        self.stage = stage
+        self.evidence('stage', name=stage)
+
+    def observe(self, data):
+        updated = data if not self.minimum else {key: min(value, self.minimum.get(key, value))
+                                                for key, value in data.items()}
+        if updated != self.minimum:
+            self.minimum = dict(updated)
+            self.evidence('resource_minima', measurements=self.minimum)
+
+    def record_image(self, image):
+        self.image_metadata = image_record(image, COMMITS[self.role])
+        self.evidence('image_built', **self.image_metadata)
+
+    def final_summary(self, result):
+        self.evidence('validation_summary', result='PASS' if result == 0 else 'STOP',
+            source_commit=COMMITS[self.role], stage=self.stage,
+            image=self.image_metadata, resource_minima=self.minimum,
+            failure=self.failure, last_command=self.last_command,
+            cleanup_pending=True, published=False)
+
 
     def docker(self, *args, **kwargs):
         return self.command(['docker', *args], **kwargs)
@@ -232,21 +276,29 @@ class Validation:
         if self.role == 'python':
             from node_gate import require_node_success
             require_node_success()  # Before private pulls, builder startup, or inference.
-        enforce(self.role, stable=True)  # Before source fetch, registry pull, builder bootstrap.
+        self.set_stage('preflight')
+        enforce(self.role, stable=True, observer=self.observe)  # Before source fetch, registry pull, builder bootstrap.
         self.monitor = True
+        self.set_stage('source_export')
         repo, context = export(self.role, self.root, self.command)
         if self.role == 'python':
             self.login()
+        self.set_stage('builder_setup')
         self.builder_start()
-        enforce(self.role, stable=True)  # Preserve after-builder stable headroom requirement.
+        self.set_stage('post_builder_preflight')
+        enforce(self.role, stable=True, observer=self.observe)  # Preserve after-builder stable headroom requirement.
         recipe = 'Dockerfile' if self.role == 'node' else 'docker/Dockerfile.v6-overlay'
+        self.set_stage('build_load')
         started = time.monotonic()
         output = self.docker('buildx', 'build', '--builder', self.builder, '--platform=linux/amd64',
                              '--progress=plain', '--provenance=false', '--sbom=false', '--load',
                              '--label', 'org.opencontainers.image.revision=' + COMMITS[self.role],
                              '--label', self.label, '-t', self.image, '-f', str(context / recipe),
                              str(context), seconds=900 if self.role == 'node' else 600)
+        self.set_stage('image_metadata')
         image = json.loads(self.docker('image', 'inspect', self.image))[0]
+        self.record_image(image)
+        self.set_stage('image_validation')
         if image['Config']['Labels'].get('org.opencontainers.image.revision') != COMMITS[self.role]:
             raise RuntimeError('Candidate source label mismatch')
         if image['Architecture'] != 'amd64' or image['Os'] != 'linux':
@@ -274,11 +326,13 @@ class Validation:
             from validate_node import validate
         # Release the builder's RAM before runtime/model initialization. No rebuild
         # follows; the loaded local candidate remains available to Docker.
+        self.set_stage('builder_stop')
         self.stop_builder()
         stopped = json.loads(self.docker('inspect', 'buildx_buildkit_' + self.builder + '0'))[0]
         if stopped['State']['Running']:
             raise RuntimeError('Builder did not stop before runtime validation')
         validate(self, repo, context)
+        self.set_stage('complete')
         self.evidence('candidate', result='PASS', source_commit=COMMITS[self.role], image_id=image['Id'],
                       image_size_bytes=image['Size'], build_seconds=round(time.monotonic() - started, 2),
                       cached_progress_lines=sum(line.endswith(b'CACHED') for line in output.splitlines()),
@@ -316,6 +370,12 @@ def main():
                           'published': False}), flush=True)
         result = 1
     finally:
+        if sys.argv[1:] != ['cleanup']:
+            try:
+                validator.final_summary(result)
+            except Exception:
+                result = 1  # Reporting must never prevent scoped cleanup.
+        validator.stage = 'cleanup'
         try:
             validator.cleanup()
         except Exception:

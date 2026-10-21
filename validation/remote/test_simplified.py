@@ -140,5 +140,220 @@ class Safeguards(unittest.TestCase):
                             v.builder_start()
 
 
+class ReportingTests(unittest.TestCase):
+    def validator(self, temp):
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1', 'RUNNER_TEMP': temp}):
+            return runner.Validation('node')
+
+    def test_successful_subprocess_preserves_return_contract(self):
+        import sys
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
+            v = self.validator(temp)
+            self.assertEqual(v.command([sys.executable, '-c', 'print("success")']), b'success\r\n' if os.name == 'nt' else b'success\n')
+            self.assertIsNone(v.failure)
+            self.assertEqual(v.last_command['exit_code'], 0)
+
+    def test_failed_subprocess_reports_sanitized_streams(self):
+        import sys
+        hidden = 'PRIVATE_SENTINEL_123456789'
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(output):
+            v = self.validator(temp)
+            v.set_stage('node_image_tests')
+            code = 'import sys; print(' + repr(hidden) + '); print("MODULE_NOT_FOUND audioInventory.test.js",file=sys.stderr); sys.exit(7)'
+            with self.assertRaises(RuntimeError):
+                v.command([sys.executable, '-c', code])
+            self.assertEqual(v.failure['exit_code'], 7)
+            self.assertEqual(v.failure['stage'], 'node_image_tests')
+            self.assertIn('MODULE_NOT_FOUND', v.failure['stderr']['error_codes'])
+            self.assertIn('audioInventory.test.js', v.failure['stderr']['test_files'])
+        self.assertNotIn(hidden, output.getvalue())
+        self.assertNotIn(code, output.getvalue())
+
+    def test_expected_nonzero_is_not_a_validation_failure(self):
+        import sys
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
+            v = self.validator(temp)
+            status, raw = v.command([sys.executable, '-c', 'import sys; print("ENOENT",file=sys.stderr);sys.exit(3)'], check=False)
+            self.assertEqual(status, 3)
+            self.assertIn(b'ENOENT', raw)
+            self.assertIsNone(v.failure)
+            self.assertEqual(v.last_command['stderr']['error_codes'], ['ENOENT'])
+
+    def test_unstructured_secrets_are_never_projected(self):
+        from reporting import command_label, project_output
+        private = b'JWT_SECRET=opaque-private-value\nAuthorization: Bearer fake-token\nMONGO_URI=mongodb://user:password@host/private\nunknown_setting=unrecognized-private-value\n'
+        projected = json.dumps(project_output(private + b'# fail 2\nMODULE_NOT_FOUND\n'))
+        for value in ('opaque-private-value', 'fake-token', 'password', 'unrecognized-private-value'):
+            self.assertNotIn(value, projected)
+            self.assertNotIn(value, command_label(['docker', 'run', '-e', value]))
+        self.assertEqual(project_output(private + b'# fail 2\n')['tap_counts']['fail'], 2)
+
+    def test_metadata_and_minima_survive_later_failure(self):
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()) as output:
+            v = self.validator(temp)
+            v.record_image({'Id': 'sha256:' + 'a' * 64, 'Size': 12345,
+                'Config': {'Labels': {'org.opencontainers.image.revision': materialize.COMMITS['node']}}})
+            v.observe({'available_ram_bytes': 9, 'docker_free_bytes': 30})
+            v.observe({'available_ram_bytes': 7, 'docker_free_bytes': 35})
+            v.stage = 'node_image_tests'
+            v.final_summary(1)
+            events = [json.loads(line) for line in output.getvalue().splitlines()]
+            self.assertEqual(events[0]['check'], 'image_built')
+            summary = events[-1]
+            self.assertEqual(summary['image']['image_size_bytes'], 12345)
+            self.assertEqual(summary['resource_minima'], {'available_ram_bytes': 7, 'docker_free_bytes': 30})
+            self.assertTrue(summary['cleanup_pending'])
+            self.assertTrue(v.root.exists())
+
+    def test_preflight_failure_is_observed_before_gate_exception(self):
+        first = Safeguards().sample(ram=5, disk=20)
+        low = {**first, 'available_ram_bytes': 1}
+        observer = Mock()
+        with patch.object(preflight, 'measure', side_effect=[first, low]), patch.object(preflight.time, 'sleep'), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                preflight.enforce('node', stable=True, observer=observer)
+        self.assertEqual(observer.call_count, 2)
+        self.assertEqual(observer.call_args.args[0]['available_ram_bytes'], 1)
+
+    def test_main_summarizes_before_cleanup_on_failure(self):
+        import sys
+        events = []
+        v = Mock()
+        v.execute.side_effect = RuntimeError('controlled failure')
+        v.final_summary.side_effect = lambda result: events.append(('summary', result))
+        v.cleanup.side_effect = lambda: events.append(('cleanup', None))
+        env = {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted', 'ROLE': 'node',
+               'GITHUB_REPOSITORY': 'Apol-bit/ispeak_backend', 'GITHUB_ACTOR': 'Apol-bit',
+               'GITHUB_EVENT_NAME': 'push', 'GITHUB_REF': 'refs/heads/ci/validate-node-dfa3138f-20261021'}
+        with patch.dict(os.environ, env), patch.object(runner.os, 'name', 'posix'), patch.object(runner, 'Validation', return_value=v), patch.object(runner.signal, 'signal'), patch.object(sys, 'argv', ['runner.py', 'node']), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runner.main(), 1)
+        self.assertEqual(events, [('summary', 1), ('cleanup', None)])
+
+    def test_reporting_failure_does_not_skip_cleanup(self):
+        import sys
+        v = Mock()
+        v.final_summary.side_effect = OSError('closed log stream')
+        env = {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted', 'ROLE': 'node',
+               'GITHUB_REPOSITORY': 'Apol-bit/ispeak_backend', 'GITHUB_ACTOR': 'Apol-bit',
+               'GITHUB_EVENT_NAME': 'push', 'GITHUB_REF': 'refs/heads/ci/validate-node-dfa3138f-20261021'}
+        with patch.dict(os.environ, env), patch.object(runner.os, 'name', 'posix'), patch.object(runner, 'Validation', return_value=v), patch.object(runner.signal, 'signal'), patch.object(sys, 'argv', ['runner.py', 'node']):
+            self.assertEqual(runner.main(), 1)
+        v.cleanup.assert_called_once()
+
+
+class FixtureTests(unittest.TestCase):
+    def setUp(self):
+        import node_fixtures
+        self.module = node_fixtures
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.here = self.base / 'tooling'
+        self.here.mkdir()
+        actual = Path(node_fixtures.__file__).resolve().parent
+        self.manifest = json.loads((actual / 'fixture-manifest.json').read_text())
+        for entry in self.manifest['python_sources']:
+            target = self.here / 'fixtures/python' / entry['source']
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((actual / 'fixtures/python' / entry['source']).read_bytes())
+        (self.here / 'python_fixture_replay.cjs').write_bytes((actual / 'python_fixture_replay.cjs').read_bytes())
+        self.helpers = {entry['source']: ('// synthetic helper ' + entry['source']).encode()
+                        for entry in self.manifest['node_helpers']}
+        for entry in self.manifest['node_helpers']:
+            entry['bytes'] = len(self.helpers[entry['source']])
+            entry['sha256'] = node_fixtures.digest(self.helpers[entry['source']])
+        self.save_manifest()
+        self.v = Mock()
+        self.v.root = self.base / 'run'
+        self.v.root.mkdir()
+        self.python_commands = 0
+        def command(args, **kwargs):
+            import subprocess
+            if args[0] == 'git':
+                return self.helpers[args[-1].split(':', 1)[1]]
+            self.python_commands += 1
+            return subprocess.check_output(args, stderr=subprocess.PIPE, timeout=kwargs['seconds'])
+        self.v.command = command
+
+    def save_manifest(self):
+        (self.here / 'fixture-manifest.json').write_text(json.dumps(self.manifest))
+
+    def prepare(self):
+        with patch.object(self.module, '__file__', str(self.here / 'node_fixtures.py')):
+            return self.module.prepare(self.v, self.base / 'source')
+
+    def replay(self, args):
+        import shutil
+        import subprocess
+        node = shutil.which('node')
+        self.assertIsNotNone(node, 'Host Node is required for offline fixture replay checks')
+        support = self.v.root / 'test-support'
+        mappings = {'/fixture-data/fixture-manifest.json': str(support / 'data/fixture-manifest.json'),
+                    '/fixture-data/assessment.json': str(support / 'data/assessment.json')}
+        for entry in self.manifest['python_sources']:
+            mappings['/ispeak_python-backendV2/' + entry['source']] = str(support / 'python-source' / entry['source'])
+        loader = r'''const fs=require('node:fs'),vm=require('node:vm'),crypto=require('node:crypto');
+const input=JSON.parse(fs.readFileSync(0,'utf8'));
+const code=fs.readFileSync(input.script,'utf8');
+process.argv=[process.execPath,'fixture-python',...input.args];
+vm.runInNewContext(code,{process,require(name){
+ if(name==='node:crypto')return crypto;
+ if(name==='node:fs')return {readFileSync(p,options){if(!Object.hasOwn(input.mappings,p))throw Error('unmapped');return fs.readFileSync(input.mappings[p],options);}};
+ throw Error('unexpected module');
+}});'''
+        return subprocess.run([node, '-e', loader], input=json.dumps({'script': str(support / 'bin/python'),
+            'args': args, 'mappings': mappings}).encode(), stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=10, check=False)
+
+    def test_exact_producer_generates_hash_bound_readonly_mounts(self):
+        args = self.prepare()
+        self.assertEqual(self.python_commands, 1)
+        mounts = [args[i + 1] for i, item in enumerate(args) if item == '--mount']
+        self.assertEqual(len(mounts), 5)
+        self.assertTrue(all(item.endswith(',readonly') for item in mounts))
+        self.assertTrue(all('docker.sock' not in item and '.env' not in item for item in mounts))
+        data = (self.v.root / 'test-support/data/assessment.json').read_bytes()
+        self.assertEqual(self.module.digest(data), self.manifest['fixture_sha256'])
+        self.assertEqual(json.loads(data)['scores']['overall'], 96.8)
+
+    def test_hash_mismatch_stops_before_producer(self):
+        self.manifest['node_helpers'][0]['sha256'] = '0' * 64
+        self.save_manifest()
+        with self.assertRaises(RuntimeError):
+            self.prepare()
+        self.assertEqual(self.python_commands, 0)
+
+    def test_changed_output_is_rejected(self):
+        self.manifest['fixture_sha256'] = '0' * 64
+        self.save_manifest()
+        with self.assertRaises(RuntimeError):
+            self.prepare()
+
+    def test_replay_matches_original_request_and_bytes(self):
+        self.prepare()
+        result = self.replay(['-B', '/ispeak_python-backendV2/testing_script/test_assessment_details.py', '--fixture'])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, (self.v.root / 'test-support/data/assessment.json').read_bytes())
+        self.assertEqual(result.stderr, b'')
+
+    def test_replay_rejects_arbitrary_python_and_tampering(self):
+        self.prepare()
+        result = self.replay(['-c', 'print("PRIVATE_VALUE")'])
+        self.assertEqual(result.returncode, 64)
+        self.assertEqual(result.stdout + result.stderr, b'')
+        (self.v.root / 'test-support/data/assessment.json').write_bytes(b'{}')
+        result = self.replay(['-B', '/ispeak_python-backendV2/testing_script/test_assessment_details.py', '--fixture'])
+        self.assertEqual(result.returncode, 65)
+        self.assertEqual(result.stdout + result.stderr, b'')
+
+    def test_test_container_remains_network_isolated(self):
+        v = runner.Validation.__new__(runner.Validation)
+        v.label = 'ispeak.validation.run=123-1'
+        args = v.run_args('test')
+        self.assertEqual(args[args.index('--network') + 1], 'none')
+        self.assertIn('--cap-drop=ALL', args)
+
+
 if __name__ == '__main__':
     unittest.main()

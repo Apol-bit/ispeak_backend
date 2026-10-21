@@ -1,0 +1,30 @@
+{
+  "node_commit": "dfa3138f76bb25fa83d0ca61adf4cc256b53fa6c",
+  "python_commit": "a76c6f47bde88f39570c99fb1de012cfbda9df72",
+  "node_helpers": [
+    {
+      "source": "scripts/audioInventory.js",
+      "bytes": 5000,
+      "sha256": "0e5e43cc06cf5dcfd6d78b38671f9847fdf1c13978e9e287c52a44fb30d1d4eb"
+    },
+    {
+      "source": "testing/storageFixtures.js",
+      "bytes": 3153,
+      "sha256": "048d0a39a7ebda419fdf90258e9c9c80078ff6fe765eaf6aac4418acadc4f0d2"
+    }
+  ],
+  "python_sources": [
+    {
+      "source": "assessment_details.py",
+      "bytes": 4465,
+      "sha256": "69a50275a1a8736a0f99165b0f39f9fb385439fa5d2d1ded6475c4985957b462"
+    },
+    {
+      "source": "testing_script/test_assessment_details.py",
+      "bytes": 3817,
+      "sha256": "2ec2f6f40e406c4437087034877b08bc530a6a232c94f949ec7c0f97a8bebdac"
+    }
+  ],
+  "fixture_sha256": "e6b47811fdb099f870a261ae04e859e0360dbc601e0d2c3f96e2b03ee7cd82b3",
+  "replay_sha256": "1991074aebd1f19496851fdfb4cdb83ecbb74a46b934553c55b57f4a2e8ef070"
+}
