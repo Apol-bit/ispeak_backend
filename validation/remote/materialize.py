@@ -1,5 +1,6 @@
 """Export only reviewed Git blobs, and independently compare the recorded hashes."""
 import hashlib
+import copy
 import json
 import subprocess
 from pathlib import Path
@@ -16,6 +17,36 @@ def security_recipe_delta(content):
     if not content.startswith(old) or content.count(old) != 1:
         raise RuntimeError('Unexpected frozen Node recipe; refuse security delta')
     return new + content[len(old):]
+
+
+def dependency_lock_delta(content):
+    patch = json.loads(Path(__file__).with_name('dependency-security-patch.json').read_text())
+    if (patch['package'] != 'follow-redirects' or patch['path'] != 'node_modules/follow-redirects'
+            or patch['before']['version'] != '1.16.0' or patch['after']['version'] != '1.16.1'
+            or patch['changed_fields'] != ['version', 'resolved', 'integrity']
+            or hashlib.sha256(content).hexdigest() != patch['original_sha256']):
+        raise RuntimeError('Frozen dependency lock identity mismatch')
+    before = json.loads(content)
+    expected = copy.deepcopy(before)
+    entry = expected['packages'][patch['path']]
+    if any(entry[key] != value for key, value in patch['before'].items()):
+        raise RuntimeError('Unexpected original follow-redirects entry')
+    text = content.decode('utf-8')
+    start = text.index('    "node_modules/follow-redirects": {')
+    end = text.index('\n    },', start) + len('\n    },')
+    block = text[start:end]
+    for key in patch['changed_fields']:
+        old = json.dumps(key) + ': ' + json.dumps(patch['before'][key])
+        new = json.dumps(key) + ': ' + json.dumps(patch['after'][key])
+        if block.count(old) != 1:
+            raise RuntimeError('Unexpected lockfile formatting; refuse broad rewrite')
+        block = block.replace(old, new)
+    updated = (text[:start] + block + text[end:]).encode('utf-8')
+    entry.update(patch['after'])
+    if (json.loads(updated) != expected
+            or hashlib.sha256(updated).hexdigest() != patch['patched_sha256']):
+        raise RuntimeError('Dependency delta changed unapproved lockfile content')
+    return updated
 
 
 def export(role, root, command):
@@ -42,6 +73,14 @@ def export(role, root, command):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
     if role == 'node':
+        lockfile = output / 'package-lock.json'
+        updated_lock = dependency_lock_delta(lockfile.read_bytes())
+        lockfile.write_bytes(updated_lock)
+        print(json.dumps({'check': 'node_dependency_security_delta',
+            'package': 'follow-redirects', 'from': '1.16.0', 'to': '1.16.1',
+            'changed_fields': ['version', 'resolved', 'integrity'],
+            'lockfile_sha256': hashlib.sha256(updated_lock).hexdigest(),
+            'package_json_changed': False, 'application_files_changed': False}), flush=True)
         recipe = output / 'Dockerfile'
         original = recipe.read_bytes()
         updated = security_recipe_delta(original)

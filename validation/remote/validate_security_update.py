@@ -7,6 +7,12 @@ from pathlib import Path
 
 def validate_security_update(v):
     v.set_stage('node_dependencies')
+    installed = v.docker(*v.run_args('node-follow-version-' + v.key, memory='256m'),
+        '--entrypoint=node', v.image, '-p', "require('follow-redirects/package.json').version",
+        seconds=30).decode().strip()
+    if installed != '1.16.1':
+        raise RuntimeError('Patched follow-redirects runtime resolution not established')
+    v.evidence('follow_redirects_runtime', result='PASS', version=installed)
     # The audit is the sole networked test: registry.npmjs.org, no cloud credentials,
     # no application startup and no database/object-storage mounts.
     status, output = v.docker(*v.run_args('node-audit-' + v.key, memory='512m', network='bridge'),
@@ -28,7 +34,9 @@ def validate_security_update(v):
         raise RuntimeError('Production dependency audit unavailable or malformed') from None
     v.evidence('node_dependency_audit', result='FINDINGS' if counts.get('total') else 'PASS',
                production_only=True, counts=counts, findings=findings,
-               dependency_files_changed=False)
+               dependency_files_changed=True)
+    if status != 0 or counts.get('total') != 0:
+        raise RuntimeError('Clean production dependency audit required before publication')
     v.set_stage('node_configuration')
     here = Path(__file__).with_name('gcp_adapter').resolve()
     manifest = json.loads((here / 'manifest.json').read_text())

@@ -1,0 +1,23 @@
+{
+  "package": "follow-redirects",
+  "path": "node_modules/follow-redirects",
+  "before": {
+    "version": "1.16.0",
+    "resolved": "https://registry.npmjs.org/follow-redirects/-/follow-redirects-1.16.0.tgz",
+    "integrity": "sha512-y5rN/uOsadFT/JfYwhxRS5R7Qce+g3zG97+JrtFZlC9klX/W5hD7iiLzScI4nZqUS7DNUdhPgw4xI8W2LuXlUw=="
+  },
+  "after": {
+    "version": "1.16.1",
+    "resolved": "https://registry.npmjs.org/follow-redirects/-/follow-redirects-1.16.1.tgz",
+    "integrity": "sha512-FNvFGzoMLWmE6Yj9spb/zjd7yiNCHiAW9/Tg9CXrQ8wuu32HtlJOwWO11OJafl5FfY3DxTdQ0vj42zU1kvv5jg=="
+  },
+  "original_sha256": "ff9eb8427263ad299b3bc496bd919fa5c831e24c378048cda38806b5cb26fcc9",
+  "patched_sha256": "e42a2c96ae46b63cbc9bdd4ad46c56afc2b63069e2e29fbdfa20378ca20dd617",
+  "changed_fields": [
+    "version",
+    "resolved",
+    "integrity"
+  ],
+  "application_files_changed": false,
+  "package_json_changed": false
+}

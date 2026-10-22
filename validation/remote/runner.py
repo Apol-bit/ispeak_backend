@@ -315,8 +315,9 @@ class Validation:
                 raise RuntimeError('Unexpected credential/configuration embedded in candidate ENV')
         if self.role == 'node':
             references = set(re.findall(rb'docker.io/library/node:24\.22\.1-bookworm-slim@sha256:[a-f0-9]{64}', output))
-            if len(references) != 1:
-                raise RuntimeError('Resolved Node base identity not established')
+            expected_base = b'docker.io/library/node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205'
+            if references != {expected_base}:
+                raise RuntimeError('Node base differs from the validated 24.22.1 release')
             self.evidence('resolved_node_base', reference=references.pop().decode())
         if self.role == 'python':
             base = json.loads(self.docker('image', 'inspect', BASE))[0]
