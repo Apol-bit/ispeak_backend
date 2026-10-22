@@ -41,6 +41,7 @@ jobs:
         run: |
           python3 -B automation/validation/remote/test_simplified.py
           python3 -B automation/validation/remote/test_publish.py
+          python3 -B automation/validation/remote/test_security_update.py
       - name: Validate frozen Node candidate
         shell: bash
         env:

@@ -314,7 +314,7 @@ class Validation:
             if key in private_keys and value:
                 raise RuntimeError('Unexpected credential/configuration embedded in candidate ENV')
         if self.role == 'node':
-            references = set(re.findall(rb'docker.io/library/node:24\.21\.0-bookworm-slim@sha256:[a-f0-9]{64}', output))
+            references = set(re.findall(rb'docker.io/library/node:24\.22\.1-bookworm-slim@sha256:[a-f0-9]{64}', output))
             if len(references) != 1:
                 raise RuntimeError('Resolved Node base identity not established')
             self.evidence('resolved_node_base', reference=references.pop().decode())

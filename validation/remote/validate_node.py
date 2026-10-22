@@ -14,7 +14,7 @@ def validate(v, repo, context):
     v.set_stage('node_version')
     version = v.docker(*v.run_args('node-version-' + v.key, memory='256m'), '--rm', '--cpus=1',
                        '--entrypoint=node', v.image, '--version').decode().strip()
-    if version != 'v24.21.0':
+    if version != 'v24.22.1':
         raise RuntimeError('Unexpected production Node version')
     v.set_stage('node_dependencies')
     v.docker(*v.run_args('node-dependencies-' + v.key, memory='512m'),
@@ -95,3 +95,5 @@ for(const name of ['.env','.git','recordings'])if(fs.existsSync('/app/'+name))pr
     v.evidence('node_startup_security', result='PASS', node_version=version,
                health='fixture-backed HTTP 200 and Docker healthy', graceful_shutdown=True,
                atlas_r2_verified=False, local_storage_exception='isolated fixture only')
+    from validate_security_update import validate_security_update
+    validate_security_update(v)

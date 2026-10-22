@@ -10,6 +10,14 @@ REPOS = {'node': 'ispeak_backend', 'python': 'ispeak_python-backendV2'}
 BASE = 'ghcr.io/apol-bit/ispeak-python@sha256:a938fb342d2ef69ad0e6110b4031d41b7ddc9628311f2f50788922a2c034c05e'
 
 
+def security_recipe_delta(content):
+    old = b'FROM node:24.21.0-bookworm-slim\n'
+    new = b'FROM node:24.22.1-bookworm-slim\n'
+    if not content.startswith(old) or content.count(old) != 1:
+        raise RuntimeError('Unexpected frozen Node recipe; refuse security delta')
+    return new + content[len(old):]
+
+
 def export(role, root, command):
     repo, output = root / 'source', root / 'context'
     repo.mkdir()
@@ -33,6 +41,16 @@ def export(role, root, command):
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
+    if role == 'node':
+        recipe = output / 'Dockerfile'
+        original = recipe.read_bytes()
+        updated = security_recipe_delta(original)
+        recipe.write_bytes(updated)
+        print(json.dumps({'check': 'node_security_recipe_delta',
+            'frozen_source': sha, 'from': '24.21.0', 'to': '24.22.1',
+            'original_recipe_sha256': hashlib.sha256(original).hexdigest(),
+            'security_recipe_sha256': hashlib.sha256(updated).hexdigest(),
+            'application_files_changed': False}), flush=True)
     if role == 'python':
         recipe = (output / 'docker/Dockerfile.v6-overlay').read_text()
         instructions = [line.strip() for line in recipe.splitlines() if line.strip() and not line.startswith('#')]
