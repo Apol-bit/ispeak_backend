@@ -4,7 +4,7 @@
   "deployed": false,
   "contexts": {
     "node": {
-      "commit": "dfa3138f76bb25fa83d0ca61adf4cc256b53fa6c",
+      "commit": "06cd1750f4c4c422c2959beb941d6f79b965dca1",
       "files": [
         {
           "path": ".dockerignore",
@@ -15,8 +15,8 @@
         {
           "path": "Dockerfile",
           "bytes": 813,
-          "sha256": "46807bda9fb743eac7493c7565e9ddee05a0d79b4a9d41078e482fff11d07d1a",
-          "gitBlob": "15f5f3018f842b19c237b1abfac8519bac1dcb18"
+          "sha256": "5fda8948fb547258fe1d8bddc7659f8d8dda94829181cd0daf01e8d8517ea102",
+          "gitBlob": "3e2ea3811e8466b641339cdbe1554dfc07c57ef2"
         },
         {
           "path": "controllers/authController.js",
@@ -32,9 +32,9 @@
         },
         {
           "path": "controllers/sessionController.js",
-          "bytes": 13544,
-          "sha256": "e7887ea3d155a381a185394983d16199725554bd68c0d07edda1d850d788bccb",
-          "gitBlob": "4b2ecc5983e4585290bf920b522c0673c3090446"
+          "bytes": 14531,
+          "sha256": "a21850343cb564351e49b80c46ae258348ae47575a65209be9f107b2f60031dc",
+          "gitBlob": "15cb73807e58da20b0b057e3755d4fc3153e1ed4"
         },
         {
           "path": "controllers/userController.js",
@@ -98,15 +98,15 @@
         },
         {
           "path": "package-lock.json",
-          "bytes": 99366,
-          "sha256": "ff9eb8427263ad299b3bc496bd919fa5c831e24c378048cda38806b5cb26fcc9",
-          "gitBlob": "b08c609763b3f6f055376293e229beba538d0cc1"
+          "bytes": 99426,
+          "sha256": "5107883894fe4c4b4d6be30e7dbfb7319c282552eb6edebe77aa02dfd48db09d",
+          "gitBlob": "97ffb79267a416bbc9c83c7fd4f8e93e9f991501"
         },
         {
           "path": "package.json",
-          "bytes": 593,
-          "sha256": "9372d76fc6da995e24564556a9cc1ca44042387a8b7ac96c25cf88b0d2691db5",
-          "gitBlob": "ee19cb13bf07f9f38878e5a3c544fc65a2492e9e"
+          "bytes": 641,
+          "sha256": "eec0d97884de3bd1d4d52d7b794a6cb58091fe4ab7cc44d67fb59007c685d56f",
+          "gitBlob": "6d58a87ecffb5c1bafe02f8c60660bf800b5538d"
         },
         {
           "path": "routes/authRoutes.js",
@@ -152,9 +152,9 @@
         },
         {
           "path": "services/audioFile.js",
-          "bytes": 2080,
-          "sha256": "b79ee2cd8249aa709a92360e104358b3b049de1a6a765b5ab0565dd95aeb4034",
-          "gitBlob": "640f58c7b0d4b45fc5b4021a5620196e302c08e5"
+          "bytes": 4113,
+          "sha256": "12c7510e05596396e2b9010c579f56158a5a3fc026aa06146feb3740c4b2ea08",
+          "gitBlob": "8697ff7a7ce9ac7396043f6da0f46bd964269336"
         },
         {
           "path": "services/audioStorageService.js",
@@ -235,7 +235,7 @@
           "gitBlob": "d1734d4f2d7da65dc05b88768c314b3d374e7c27"
         }
       ],
-      "bytes": 210460
+      "bytes": 213588
     },
     "python": {
       "commit": "a76c6f47bde88f39570c99fb1de012cfbda9df72",

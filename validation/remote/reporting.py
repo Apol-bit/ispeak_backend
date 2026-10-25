@@ -11,6 +11,7 @@ ERROR_CODES = frozenset(('MODULE_NOT_FOUND', 'ERR_MODULE_NOT_FOUND', 'ERR_ASSERT
 # Reviewed public test filenames, not arbitrary text parsed from subprocess output.
 TEST_FILES = frozenset(('analysisAdmission.test.js', 'analysisGateway.test.js',
     'analysisResponse.test.js', 'assessmentDetails.test.js', 'audioInventory.test.js',
+    'audioTransportMetadata.test.js',
     'authorization.test.js', 'containerConfiguration.test.js', 'databaseReadiness.test.js',
     'fillerAnalysis.test.js', 'history.test.js', 'integrationIsolation.test.js',
     'localAudioUat.test.js', 'performanceStatistics.test.js', 'r2Flows.test.js',

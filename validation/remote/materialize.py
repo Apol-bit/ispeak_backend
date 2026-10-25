@@ -1,52 +1,33 @@
 """Export only reviewed Git blobs, and independently compare the recorded hashes."""
 import hashlib
-import copy
 import json
 import subprocess
 from pathlib import Path
 
-COMMITS = {'node': 'dfa3138f76bb25fa83d0ca61adf4cc256b53fa6c',
+COMMITS = {'node': '06cd1750f4c4c422c2959beb941d6f79b965dca1',
            'python': 'a76c6f47bde88f39570c99fb1de012cfbda9df72'}
 REPOS = {'node': 'ispeak_backend', 'python': 'ispeak_python-backendV2'}
 BASE = 'ghcr.io/apol-bit/ispeak-python@sha256:a938fb342d2ef69ad0e6110b4031d41b7ddc9628311f2f50788922a2c034c05e'
 
 
 def security_recipe_delta(content):
-    old = b'FROM node:24.21.0-bookworm-slim\n'
-    new = b'FROM node:24.22.1-bookworm-slim\n'
-    if not content.startswith(old) or content.count(old) != 1:
-        raise RuntimeError('Unexpected frozen Node recipe; refuse security delta')
-    return new + content[len(old):]
+    expected = b'FROM node:24.22.1-bookworm-slim\n'
+    if not content.startswith(expected) or content.count(expected) != 1:
+        raise RuntimeError('Unexpected frozen Node recipe; secure runtime pin required')
+    return content
 
 
-def dependency_lock_delta(content):
-    patch = json.loads(Path(__file__).with_name('dependency-security-patch.json').read_text())
+def dependency_lock_delta(content, patch=None):
+    patch = patch or json.loads(Path(__file__).with_name('dependency-security-patch.json').read_text())
     if (patch['package'] != 'follow-redirects' or patch['path'] != 'node_modules/follow-redirects'
             or patch['before']['version'] != '1.16.0' or patch['after']['version'] != '1.16.1'
             or patch['changed_fields'] != ['version', 'resolved', 'integrity']
-            or hashlib.sha256(content).hexdigest() != patch['original_sha256']):
-        raise RuntimeError('Frozen dependency lock identity mismatch')
-    before = json.loads(content)
-    expected = copy.deepcopy(before)
-    entry = expected['packages'][patch['path']]
-    if any(entry[key] != value for key, value in patch['before'].items()):
-        raise RuntimeError('Unexpected original follow-redirects entry')
-    text = content.decode('utf-8')
-    start = text.index('    "node_modules/follow-redirects": {')
-    end = text.index('\n    },', start) + len('\n    },')
-    block = text[start:end]
-    for key in patch['changed_fields']:
-        old = json.dumps(key) + ': ' + json.dumps(patch['before'][key])
-        new = json.dumps(key) + ': ' + json.dumps(patch['after'][key])
-        if block.count(old) != 1:
-            raise RuntimeError('Unexpected lockfile formatting; refuse broad rewrite')
-        block = block.replace(old, new)
-    updated = (text[:start] + block + text[end:]).encode('utf-8')
-    entry.update(patch['after'])
-    if (json.loads(updated) != expected
-            or hashlib.sha256(updated).hexdigest() != patch['patched_sha256']):
-        raise RuntimeError('Dependency delta changed unapproved lockfile content')
-    return updated
+            or hashlib.sha256(content).hexdigest() != patch['source_sha256']):
+        raise RuntimeError('Frozen secure dependency lock identity mismatch')
+    entry = json.loads(content)['packages'][patch['path']]
+    if any(entry[key] != value for key, value in patch['after'].items()):
+        raise RuntimeError('Patched follow-redirects entry required')
+    return content
 
 
 def export(role, root, command):
@@ -76,19 +57,17 @@ def export(role, root, command):
         lockfile = output / 'package-lock.json'
         updated_lock = dependency_lock_delta(lockfile.read_bytes())
         lockfile.write_bytes(updated_lock)
-        print(json.dumps({'check': 'node_dependency_security_delta',
-            'package': 'follow-redirects', 'from': '1.16.0', 'to': '1.16.1',
-            'changed_fields': ['version', 'resolved', 'integrity'],
+        print(json.dumps({'check': 'node_dependency_security_source',
+            'package': 'follow-redirects', 'version': '1.16.1',
             'lockfile_sha256': hashlib.sha256(updated_lock).hexdigest(),
             'package_json_changed': False, 'application_files_changed': False}), flush=True)
         recipe = output / 'Dockerfile'
         original = recipe.read_bytes()
         updated = security_recipe_delta(original)
         recipe.write_bytes(updated)
-        print(json.dumps({'check': 'node_security_recipe_delta',
-            'frozen_source': sha, 'from': '24.21.0', 'to': '24.22.1',
-            'original_recipe_sha256': hashlib.sha256(original).hexdigest(),
-            'security_recipe_sha256': hashlib.sha256(updated).hexdigest(),
+        print(json.dumps({'check': 'node_security_recipe_source',
+            'frozen_source': sha, 'node_version': '24.22.1',
+            'recipe_sha256': hashlib.sha256(updated).hexdigest(),
             'application_files_changed': False}), flush=True)
     if role == 'python':
         recipe = (output / 'docker/Dockerfile.v6-overlay').read_text()

@@ -1,8 +1,7 @@
-"""Regression checks for the exact, one-line frozen-recipe security delta."""
+"""Regression checks for the exact frozen secure recipe and dependency lock."""
 import hashlib
 import json
 import unittest
-import copy
 import tempfile
 import shutil
 from unittest.mock import Mock, patch
@@ -12,36 +11,36 @@ import validate_security_update as runtime
 
 
 class SecurityDelta(unittest.TestCase):
-    def original_lock(self):
-        return Path(__file__).resolve().parents[2].joinpath('package-lock.json').read_bytes()
+    def secure_lock(self):
+        root = Path(__file__).resolve().parents[2]
+        data = json.loads(root.joinpath('package-lock.json').read_bytes())
+        manifest = json.loads(Path(__file__).with_name('dependency-security-patch.json').read_text())
+        data['packages'][manifest['path']].update(manifest['after'])
+        content = (json.dumps(data, indent=2) + '\n').encode()
+        manifest['source_sha256'] = hashlib.sha256(content).hexdigest()
+        return content, manifest
 
-    def test_lockfile_delta_changes_only_three_fields(self):
-        original = self.original_lock()
-        updated = dependency_lock_delta(original)
-        before = json.loads(original)
-        after = json.loads(updated)
-        old_entry = before['packages']['node_modules/follow-redirects']
-        new_entry = after['packages']['node_modules/follow-redirects']
-        changed = {key for key in old_entry if old_entry[key] != new_entry[key]}
-        self.assertEqual(changed, {'version', 'resolved', 'integrity'})
-        self.assertEqual(new_entry['version'], '1.16.1')
-        restored = copy.deepcopy(after)
-        restored['packages']['node_modules/follow-redirects'] = old_entry
-        self.assertEqual(restored, before)
-        self.assertEqual(before['packages']['node_modules/axios']['dependencies']['follow-redirects'], '^1.16.0')
+    def test_secure_lockfile_is_verified_without_mutation(self):
+        original, manifest = self.secure_lock()
+        updated = dependency_lock_delta(original, manifest)
+        data = json.loads(updated)
+        self.assertEqual(updated, original)
+        self.assertEqual(data['packages']['node_modules/follow-redirects']['version'], '1.16.1')
+        self.assertEqual(data['packages']['node_modules/axios']['dependencies']['follow-redirects'], '^1.16.0')
 
     def test_lockfile_rejects_unrelated_content_change(self):
+        original, manifest = self.secure_lock()
         with self.assertRaises(RuntimeError):
-            dependency_lock_delta(self.original_lock() + b' ')
+            dependency_lock_delta(original + b' ', manifest)
 
-    def test_only_first_base_line_changes(self):
-        original = b'FROM node:24.21.0-bookworm-slim\n\nRUN unchanged\n'
+    def test_secure_base_line_is_verified_without_mutation(self):
+        original = b'FROM node:24.22.1-bookworm-slim\n\nRUN unchanged\n'
         updated = security_recipe_delta(original)
-        self.assertEqual(updated, b'FROM node:24.22.1-bookworm-slim\n\nRUN unchanged\n')
+        self.assertEqual(updated, original)
 
     def test_rejects_unexpected_recipe(self):
-        for original in (b'FROM node:latest\n', b'FROM node:24.21.0-bookworm-slim\r\n',
-                         b'FROM node:24.21.0-bookworm-slim\nFROM node:24.21.0-bookworm-slim\n'):
+        for original in (b'FROM node:latest\n', b'FROM node:24.22.1-bookworm-slim\r\n',
+                         b'FROM node:24.22.1-bookworm-slim\nFROM node:24.22.1-bookworm-slim\n'):
             with self.assertRaises(RuntimeError):
                 security_recipe_delta(original)
 

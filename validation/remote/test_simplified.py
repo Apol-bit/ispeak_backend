@@ -39,7 +39,7 @@ class Safeguards(unittest.TestCase):
         self.assertIn('RAM', preflight.problems('node', data, start=True))
 
     def test_frozen_identities(self):
-        self.assertEqual(materialize.COMMITS['node'], 'dfa3138f76bb25fa83d0ca61adf4cc256b53fa6c')
+        self.assertEqual(materialize.COMMITS['node'], '06cd1750f4c4c422c2959beb941d6f79b965dca1')
         self.assertEqual(materialize.COMMITS['python'], 'a76c6f47bde88f39570c99fb1de012cfbda9df72')
         self.assertEqual(materialize.BASE, 'ghcr.io/apol-bit/ispeak-python@sha256:a938fb342d2ef69ad0e6110b4031d41b7ddc9628311f2f50788922a2c034c05e')
 

@@ -34,7 +34,7 @@ def validate_security_update(v):
         raise RuntimeError('Production dependency audit unavailable or malformed') from None
     v.evidence('node_dependency_audit', result='FINDINGS' if counts.get('total') else 'PASS',
                production_only=True, counts=counts, findings=findings,
-               dependency_files_changed=True)
+               dependency_files_changed=False)
     if status != 0 or counts.get('total') != 0:
         raise RuntimeError('Clean production dependency audit required before publication')
     v.set_stage('node_configuration')
