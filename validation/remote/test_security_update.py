@@ -1,6 +1,7 @@
 """Regression checks for the exact frozen secure recipe and dependency lock."""
 import hashlib
 import json
+import re
 import unittest
 import tempfile
 import shutil
@@ -50,7 +51,18 @@ class SecurityDelta(unittest.TestCase):
         for name, digest in manifest.items():
             self.assertEqual(hashlib.sha256((root / name).read_bytes()).hexdigest(), digest)
         self.assertEqual(manifest['preload.cjs'],
-                         'f6e31d381183e33fa3054bf79ab3f55744fc4a7d8026380dde586bada0ba3815')
+                         '186dd06c8a3d90849ea57d8cac7f7f1b11ed5237b29abb2a9339161f24fe4fb6')
+
+    def test_adapter_file_guards_match_frozen_node_context(self):
+        here = Path(__file__).resolve().parent
+        preload = here.joinpath('gcp_adapter/preload.cjs').read_text()
+        match = re.search(r'^const EXPECTED = (\{.*\}); //', preload, re.MULTILINE)
+        self.assertIsNotNone(match)
+        guarded = json.loads(match.group(1))
+        context = json.loads(here.joinpath('context-manifest.json').read_text())['contexts']['node']
+        approved = {entry['path']: entry['sha256'] for entry in context['files']}
+        self.assertEqual(len(guarded), 8)
+        self.assertEqual(guarded, {path: approved[path] for path in guarded})
 
 
 class AuditGate(unittest.TestCase):
