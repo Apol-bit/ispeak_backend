@@ -22,7 +22,7 @@ async function main() {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ispeak-r2-probe-'));
   let client;
   let attempted = false;
-  const key = `deployment-tests/${randomUUID()}.txt`;
+  const key = `deployment-tests/${randomUUID().replaceAll('-', '')}/probe.txt`;
   const send = command => client.send(command, { abortSignal: AbortSignal.timeout(30000) });
   try {
     const savedDriver = process.env.STORAGE_DRIVER;
