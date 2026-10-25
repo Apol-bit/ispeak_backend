@@ -271,7 +271,7 @@ The filler model is provisioned by the current Dockerfile at
 
 | Component | Setting |
 | --- | --- |
-| Node Railpack | `RAILPACK_NODE_VERSION=24.14.0`; `RAILPACK_INSTALL_CMD=npm ci --omit=dev --ignore-scripts` |
+| Node Railpack | `RAILPACK_NODE_VERSION=24.22.1`; `RAILPACK_INSTALL_CMD=npm ci --omit=dev --ignore-scripts` |
 | Admin Flutter | Compile-time `API_BASE_URL=https://<actual-api-domain>/api` |
 | Android Flutter | Same compile-time public API URL; production HTTPS required |
 | Registry/account settings | Private pull credentials in host settings, never Node/Python env or image |

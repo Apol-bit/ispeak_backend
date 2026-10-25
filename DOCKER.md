@@ -14,7 +14,7 @@ docker build --check .
 docker build -t ispeak-node:local .
 ```
 
-The base is `node:24.21.0-bookworm-slim` (Node 24 LTS), Linux/amd64 in the verified
+The base is `node:24.22.1-bookworm-slim` (Node 24 LTS), Linux/amd64 in the verified
 build. The build uses the existing package-lock with `npm ci --omit=dev`, cleans
 the npm cache, copies only runtime source, and runs as UID 1000 (`node`). No
 dependency versions, application handlers, database schemas, or storage behavior
