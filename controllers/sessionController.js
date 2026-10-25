@@ -11,7 +11,7 @@ const FormData = require('form-data');
 const { storage } = require('../services/storageService');
 const { audioStorage } = require('../services/audioStorageService');
 const { storageFailure, StorageError } = require('../services/storageErrors');
-const { AUDIO_TYPES } = require('../services/audioFile');
+const { AUDIO_TYPES, audioTransportMetadata } = require('../services/audioFile');
 const { mapAiError, usableAnalysis, analysisFeedback } = require('../services/analysisResponse');
 const { logError } = require('../services/safeLogger');
 const { mapFillerAnalysis } = require('../services/fillerAnalysis');
@@ -69,6 +69,25 @@ exports.uploadAudioAI = async (req, res) => {
       await audioStorage.cleanupTemp(req.file);
       return res.status(400).json({ message: error.message });
     }
+    const transport = await audioTransportMetadata(req.file.path);
+    console.info(JSON.stringify({
+      event: 'audio_transport_metadata',
+      sha256: transport.sha256,
+      bytes: transport.bytes,
+      extension: transport.extension,
+      inboundContentType: [
+        ...Object.values(AUDIO_TYPES), 'audio/wave', 'audio/x-wav', 'application/octet-stream',
+      ].includes(req.file.mimetype) ? req.file.mimetype : 'unknown',
+      outboundContentType: transport.extension === '.wav' ? 'audio/wave' : transport.contentType,
+      sampleRate: transport.sampleRate,
+      channels: transport.channels,
+      bitsPerSample: transport.bitsPerSample,
+      encodedDurationSeconds: transport.durationSeconds,
+      declaredDurationSeconds: durationPolicy.declared ?? null,
+      language: sessionLanguage,
+      practiceMode: practiceMode || null,
+      referenceUsed: Boolean(referenceAudioPath),
+    }));
     const formData = new FormData();
     recordingStream = fs.createReadStream(req.file.path);
     formData.append('file', recordingStream);
@@ -99,7 +118,8 @@ exports.uploadAudioAI = async (req, res) => {
       const timeout = Number(process.env.PYTHON_TIMEOUT_MS || 300000);
       const fastApiResponse = await axios.post(`${pythonUrl}/transcribe`, formData, {
         headers: { ...formData.getHeaders(), ...(process.env.PYTHON_SERVICE_TOKEN
-          ? { 'X-iSpeak-Service-Token': process.env.PYTHON_SERVICE_TOKEN } : {}) },
+          ? { 'X-iSpeak-Service-Token': process.env.PYTHON_SERVICE_TOKEN } : {}),
+          'X-iSpeak-Audio-SHA256': transport.sha256 },
         maxRedirects: 0, // Do not forward the service credential to another host.
         timeout: Number.isFinite(timeout) && timeout > 0 ? timeout : 300000,
         maxBodyLength: 51 * 1024 * 1024

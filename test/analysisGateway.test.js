@@ -20,12 +20,14 @@ User.findById = () => ({select: async () => ({_id:id,role:'user',status:'Active'
 User.exists = async () => ({_id:id});
 SpeechSession.prototype.save = async function() {if(databaseFailure) throw new Error('database offline'); saves++; return this;};
 const token = jwt.sign({userId:id}, process.env.JWT_SECRET, {algorithm:'HS256',issuer:'ispeak-api',audience:'ispeak-clients',expiresIn:'1h'});
-let ai, gateway, url, mode, serviceHeader;
+let ai, gateway, url, mode, serviceHeader, serviceAudioHash, serviceBody;
 async function listen(server) { await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve)); return `http://127.0.0.1:${server.address().port}`; }
 test.before(async()=>{
  ai=http.createServer((request,response)=>{
   serviceHeader = request.headers['x-ispeak-service-token'];
-  request.resume();request.on('end',()=>{
+  serviceAudioHash = request.headers['x-ispeak-audio-sha256'];
+  const chunks=[]; request.on('data',chunk=>chunks.push(chunk)); request.on('end',()=>{
+   serviceBody=Buffer.concat(chunks);
    if(mode==='connection'){request.socket.destroy();return;}
    if(mode==='timeout'){return;}
    const status=mode==='unusable'?200:Number(mode);
@@ -76,4 +78,14 @@ test('Node forwards only configured private service token to Python', async()=>{
   assert.equal(serviceHeader,process.env.PYTHON_SERVICE_TOKEN);
   assert.doesNotMatch(await response.text(), /gateway-test-only-service-token/);
  } finally {delete process.env.PYTHON_SERVICE_TOKEN;}
+});
+
+test('Node forwards the exact audio bytes with their SHA-256 digest', async()=>{
+ mode='200'; const audio=Buffer.from('exact phone audio fixture');
+ const form=new FormData();form.append('audio',new Blob([audio]),'phone.wav');
+ const response=await fetch(url+'/api/upload-audio',{method:'POST',headers:{Authorization:'Bearer '+token},body:form});
+ assert.equal(response.status,200);
+ assert.equal(serviceAudioHash,require('node:crypto').createHash('sha256').update(audio).digest('hex'));
+ assert.notEqual(serviceBody.indexOf(audio),-1);
+ for(const name of fs.readdirSync(root)) if(name!=='reference_audio') fs.unlinkSync(path.join(root,name));
 });
